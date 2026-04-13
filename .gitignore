@@ -1,0 +1,8 @@
+# Build output
+*.o
+*.exe
+sdlfun
+build/
+
+# Dev-C++ temp files
+Makefile.win
