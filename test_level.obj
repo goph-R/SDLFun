@@ -1,0 +1,193 @@
+# Test FPS level with slopes
+# Room 1 (main room) + Room 2 (upper room) + gentle ramp connecting them
+# Player spawns at (0, 2, 0) in Room 1
+
+# ============================================================
+# VERTICES
+# ============================================================
+
+# --- Room 1 floor (y=0), 16x16 ---
+v -8.0  0.0 -8.0
+v  8.0  0.0 -8.0
+v  8.0  0.0  8.0
+v -8.0  0.0  8.0
+
+# --- Room 1 ceiling (y=4) ---
+v -8.0  4.0 -8.0
+v  8.0  4.0 -8.0
+v  8.0  4.0  8.0
+v -8.0  4.0  8.0
+
+# --- Room 2 floor (y=2), shifted right, 12x16 ---
+v 14.0  2.0 -8.0
+v 26.0  2.0 -8.0
+v 26.0  2.0  8.0
+v 14.0  2.0  8.0
+
+# --- Room 2 ceiling (y=6) ---
+v 14.0  6.0 -8.0
+v 26.0  6.0 -8.0
+v 26.0  6.0  8.0
+v 14.0  6.0  8.0
+
+# --- Ramp surface (x=8 y=0 to x=14 y=2, ~18 degrees) ---
+# width: z=-3 to z=3
+v  8.0  0.0 -3.0
+v 14.0  2.0 -3.0
+v  8.0  0.0  3.0
+v 14.0  2.0  3.0
+
+# --- Room 1 walls ---
+# Back wall (z=-8)
+v -8.0  0.0 -8.0
+v  8.0  0.0 -8.0
+v  8.0  4.0 -8.0
+v -8.0  4.0 -8.0
+
+# Front wall (z=+8)
+v -8.0  0.0  8.0
+v  8.0  0.0  8.0
+v  8.0  4.0  8.0
+v -8.0  4.0  8.0
+
+# Left wall (x=-8)
+v -8.0  0.0 -8.0
+v -8.0  0.0  8.0
+v -8.0  4.0  8.0
+v -8.0  4.0 -8.0
+
+# Right wall segment 1 (x=+8, z=-8 to z=-3)
+v  8.0  0.0 -8.0
+v  8.0  0.0 -3.0
+v  8.0  4.0 -3.0
+v  8.0  4.0 -8.0
+
+# Right wall segment 2 (x=+8, z=+3 to z=+8)
+v  8.0  0.0  3.0
+v  8.0  0.0  8.0
+v  8.0  4.0  8.0
+v  8.0  4.0  3.0
+
+# --- Room 2 walls ---
+# Back wall (z=-8)
+v 14.0  2.0 -8.0
+v 26.0  2.0 -8.0
+v 26.0  6.0 -8.0
+v 14.0  6.0 -8.0
+
+# Front wall (z=+8)
+v 14.0  2.0  8.0
+v 26.0  2.0  8.0
+v 26.0  6.0  8.0
+v 14.0  6.0  8.0
+
+# Right wall (x=26)
+v 26.0  2.0 -8.0
+v 26.0  2.0  8.0
+v 26.0  6.0  8.0
+v 26.0  6.0 -8.0
+
+# Left wall segment 1 (x=14, z=-8 to z=-3)
+v 14.0  2.0 -8.0
+v 14.0  2.0 -3.0
+v 14.0  6.0 -3.0
+v 14.0  6.0 -8.0
+
+# Left wall segment 2 (x=14, z=+3 to z=+8)
+v 14.0  2.0  3.0
+v 14.0  2.0  8.0
+v 14.0  6.0  8.0
+v 14.0  6.0  3.0
+
+# --- Ramp side walls ---
+# Left ramp wall (z=-3 side)
+v  8.0  0.0 -3.0
+v 14.0  2.0 -3.0
+v 14.0  6.0 -3.0
+v  8.0  4.0 -3.0
+
+# Right ramp wall (z=+3 side)
+v  8.0  0.0  3.0
+v 14.0  2.0  3.0
+v 14.0  6.0  3.0
+v  8.0  4.0  3.0
+
+# --- Ramp ceiling ---
+# Flat ceiling over the ramp corridor at y=4 (room1 side) to y=6 (room2 side)
+# Using same z range as ramp: z=-3 to z=3
+v  8.0  4.0 -3.0
+v 14.0  6.0 -3.0
+v  8.0  4.0  3.0
+v 14.0  6.0  3.0
+
+# ============================================================
+# NORMALS
+# ============================================================
+vn  0.0  1.0  0.0
+vn  0.0 -1.0  0.0
+vn  0.0  0.0  1.0
+vn  0.0  0.0 -1.0
+vn  1.0  0.0  0.0
+vn -1.0  0.0  0.0
+# Ramp surface normal (surface goes dx=6 dy=2, normal points up-left)
+vn -0.316  0.949  0.0
+# Ramp ceiling normal (points down into corridor)
+vn  0.316 -0.949  0.0
+
+# ============================================================
+# FACES - all wound so front face is visible from INSIDE rooms
+# ============================================================
+
+# Room 1 floor (facing up, CCW when viewed from above)
+f 4//1 3//1 2//1 1//1
+
+# Room 1 ceiling (facing down, CCW when viewed from below)
+f 5//2 6//2 7//2 8//2
+
+# Room 2 floor
+f 12//1 11//1 10//1 9//1
+
+# Room 2 ceiling
+f 13//2 14//2 15//2 16//2
+
+# Ramp surface (walkable, facing up)
+f 19//7 20//7 18//7 17//7
+
+# Room 1 back wall (z=-8, visible from inside = facing +z)
+f 21//3 22//3 23//3 24//3
+
+# Room 1 front wall (z=+8, visible from inside = facing -z)
+f 28//4 27//4 26//4 25//4
+
+# Room 1 left wall (x=-8, visible from inside = facing +x)
+f 32//5 31//5 30//5 29//5
+
+# Room 1 right wall seg 1 (x=+8, visible from inside = facing -x)
+f 33//6 34//6 35//6 36//6
+
+# Room 1 right wall seg 2 (x=+8, visible from inside = facing -x)
+f 37//6 38//6 39//6 40//6
+
+# Room 2 back wall (z=-8, facing +z)
+f 41//3 42//3 43//3 44//3
+
+# Room 2 front wall (z=+8, facing -z)
+f 48//4 47//4 46//4 45//4
+
+# Room 2 right wall (x=26, facing -x)
+f 49//6 50//6 51//6 52//6
+
+# Room 2 left wall seg 1 (x=14, facing +x)
+f 56//5 55//5 54//5 53//5
+
+# Room 2 left wall seg 2 (x=14, facing +x)
+f 60//5 59//5 58//5 57//5
+
+# Ramp left side wall (z=-3, facing +z into corridor)
+f 61//3 62//3 63//3 64//3
+
+# Ramp right side wall (z=+3, facing -z into corridor)
+f 68//4 67//4 66//4 65//4
+
+# Ramp ceiling (facing down into corridor)
+f 71//8 69//8 70//8 72//8

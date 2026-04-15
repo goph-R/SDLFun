@@ -1,0 +1,43 @@
+# Makefile for Windows (Dev-C++ / MinGW) - FPS Demo
+CPP  = g++.exe
+CC   = gcc.exe
+WINDRES = windres.exe
+
+BULLET_SRC = vendor/bullet3-3.25/src
+BULLET_CXXFLAGS = -I$(BULLET_SRC)
+BULLET_OBJS = bullet_linear_math.o bullet_collision.o bullet_dynamics.o
+
+INCS = -I"C:/DEV-CPP/include" -I"vendor/include" $(BULLET_CXXFLAGS)
+CXXINCS = -I"C:/DEV-CPP/lib/gcc/mingw32/3.4.2/include" \
+          -I"C:/DEV-CPP/include/c++/3.4.2/backward" \
+          -I"C:/DEV-CPP/include/c++/3.4.2/mingw32" \
+          -I"C:/DEV-CPP/include/c++/3.4.2" \
+          -I"C:/DEV-CPP/include" \
+          -I"vendor/include" $(BULLET_CXXFLAGS)
+
+BIN  = SDLFun.exe
+LIBS = -L"C:/DEV-CPP/lib" -L"vendor/lib" -lmingw32 -lSDLmain -lSDL -lopengl32 -lfmod
+CXXFLAGS = $(CXXINCS) -O2
+OBJ  = main.o $(BULLET_OBJS)
+
+.PHONY: all clean
+
+all: $(BIN)
+
+clean:
+	rm -f $(OBJ) $(BIN)
+
+$(BIN): $(OBJ)
+	$(CPP) $(OBJ) -o "SDLFun.exe" $(LIBS)
+
+main.o: main.cpp obj_loader.h physics.h
+	$(CPP) -c main.cpp -o main.o $(CXXFLAGS)
+
+bullet_linear_math.o: $(BULLET_SRC)/btLinearMathAll.cpp
+	$(CPP) -c $< -o $@ $(BULLET_CXXFLAGS) -O2
+
+bullet_collision.o: $(BULLET_SRC)/btBulletCollisionAll.cpp
+	$(CPP) -c $< -o $@ $(BULLET_CXXFLAGS) -O2
+
+bullet_dynamics.o: $(BULLET_SRC)/btBulletDynamicsAll.cpp
+	$(CPP) -c $< -o $@ $(BULLET_CXXFLAGS) -O2

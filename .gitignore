@@ -4,5 +4,9 @@
 sdlfun
 build/
 
-# Dev-C++ temp files
-Makefile.win
+# Temp/log files
+output.txt
+stdout.txt
+
+# Downloaded installers
+ms3d184setup.exe
