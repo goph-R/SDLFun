@@ -241,6 +241,11 @@ static void renderLevel(ObjMesh *mesh, GLuint diffuseTex, GLuint lightmapTex)
     int hasDiffuse = (diffuseTex != 0 && mesh->numTexcoords > 0);
     int hasLightmap = (lightmapTex != 0 && hasMultitexture && mesh->numTexcoords > 0);
 
+    /* When lightmaps are active, disable GL_LIGHTING — the lightmap already
+       contains all lighting information. GL_LIGHTING would add directional
+       bias (e.g., darkening ceilings whose normals face away from GL_LIGHT0). */
+    if (hasLightmap) glDisable(GL_LIGHTING);
+
     if (hasDiffuse) {
         if (hasLightmap) {
             /* Unit 0: diffuse texture */
@@ -303,6 +308,7 @@ static void renderLevel(ObjMesh *mesh, GLuint diffuseTex, GLuint lightmapTex)
         MT_ActiveTexture(GL_TEXTURE1_ARB);
         glDisable(GL_TEXTURE_2D);
         MT_ActiveTexture(GL_TEXTURE0_ARB);
+        glEnable(GL_LIGHTING); /* restore for entities/gun */
     }
     if (hasDiffuse) {
         glDisable(GL_TEXTURE_2D);
