@@ -19,6 +19,7 @@
 
 #include "obj_loader.h"
 #include "texture.h"
+#include "iqm.h"
 #include "physics.h"
 
 #define SAMPLE_RATE 44100
@@ -605,6 +606,14 @@ int main(int argc, char *argv[])
     /* Build sector batches (sorts triangles by material) */
     objBuildSectors(&level);
 
+    /* Load test IQM model */
+    IqmModel testModel;
+    int hasTestModel = iqmLoad(&testModel, "models/mrfixit.iqm");
+    if (hasTestModel) {
+        iqmLoadTextures(&testModel, "models/mrfixit.iqm", &texCache);
+    }
+    float testAnimTime = 0.0f;
+
     /* Camera state */
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -712,6 +721,28 @@ int main(int argc, char *argv[])
 
         renderLevelSectored(&level, &texCache);
 
+        /* Render test IQM model in front of player spawn */
+        if (hasTestModel) {
+            if (testModel.numAnims > 0) {
+                testAnimTime += dt * testModel.anims[0].framerate;
+                if (testAnimTime >= testModel.anims[0].numFrames)
+                    testAnimTime -= testModel.anims[0].numFrames;
+            }
+            iqmAnimate(&testModel, testAnimTime);
+
+            glEnable(GL_LIGHTING);
+            glColor3f(1.0f, 1.0f, 1.0f);
+            glPushMatrix();
+            /* Place at (0, 0, -3): in Room 1, facing toward spawn point */
+            glTranslatef(0.0f, 0.0f, -3.0f);
+            glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);  /* Z-up to Y-up */
+            glScalef(0.15f, 0.15f, 0.15f);
+            glCullFace(GL_FRONT);  /* IQM has opposite winding */
+            iqmRender(&testModel);
+            glCullFace(GL_BACK);
+            glPopMatrix();
+        }
+
         renderGun(gunFlashTimer);
         renderCrosshair();
 
@@ -720,6 +751,7 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
+    if (hasTestModel) iqmFree(&testModel);
     texCacheFree(&texCache);
     physCleanup(&phys);
     objFree(&level);
