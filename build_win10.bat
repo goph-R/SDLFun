@@ -13,6 +13,7 @@ set "GCC=vendor_win10\mingw32\bin\gcc.exe"
 if not exist "%GPP%" (
     echo ERROR: MinGW not found at %GPP%
     echo Download WinLibs i686 and extract to vendor_win10\mingw32\
+    echo https://github.com/brechtsanders/winlibs_mingw/releases
     goto error
 )
 
