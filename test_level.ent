@@ -1,0 +1,14 @@
+# Entity definitions for test_level
+# Format: type name group posX posY posZ rotY [key=value ...]
+
+# Player spawn point
+player spawn - 0 2 0 0
+
+# Animated decoration: mrfixit standing in Room 1
+decoration mrfixit_01 props 0 0 -3 0 iqm=models/mrfixit.iqm scale=0.15 flip_cull=1
+
+# Another one in Room 2
+decoration mrfixit_02 props 20 2 0 90 iqm=models/mrfixit.iqm scale=0.15 flip_cull=1
+
+# Test trigger near the ramp
+trigger ramp_zone - 11 1 0 0 size=3,3,3 target=mrfixit_02 once=0

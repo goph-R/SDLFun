@@ -20,6 +20,7 @@
 #include "obj_loader.h"
 #include "texture.h"
 #include "iqm.h"
+#include "entity.h"
 #include "physics.h"
 
 #define SAMPLE_RATE 44100
@@ -597,22 +598,27 @@ int main(int argc, char *argv[])
     printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
            level.numVerts, level.numTexcoords, level.numTris, level.numMaterials);
 
+    /* Load entities (before physics, to get player spawn position) */
+    EntityList entities;
+    entListInit(&entities);
+    entLoadFile(&entities, "test_level.ent", &texCache);
+
+    float spawnX = 0.0f, spawnY = 2.0f, spawnZ = 0.0f;
+    if (entities.playerIndex >= 0) {
+        Entity *pe = &entities.entities[entities.playerIndex];
+        spawnX = pe->posX;
+        spawnY = pe->posY;
+        spawnZ = pe->posZ;
+    }
+
     /* Init physics BEFORE building sectors (sorting changes triangle order) */
     PhysWorld phys;
     physInit(&phys);
     physLoadLevel(&phys, &level);
-    physCreatePlayer(&phys, 0.0f, 2.0f, 0.0f);
+    physCreatePlayer(&phys, spawnX, spawnY, spawnZ);
 
     /* Build sector batches (sorts triangles by material) */
     objBuildSectors(&level);
-
-    /* Load test IQM model */
-    IqmModel testModel;
-    int hasTestModel = iqmLoad(&testModel, "models/mrfixit.iqm");
-    if (hasTestModel) {
-        iqmLoadTextures(&testModel, "models/mrfixit.iqm", &texCache);
-    }
-    float testAnimTime = 0.0f;
 
     /* Camera state */
     float yaw = 0.0f;
@@ -721,27 +727,11 @@ int main(int argc, char *argv[])
 
         renderLevelSectored(&level, &texCache);
 
-        /* Render test IQM model in front of player spawn */
-        if (hasTestModel) {
-            if (testModel.numAnims > 0) {
-                testAnimTime += dt * testModel.anims[0].framerate;
-                if (testAnimTime >= testModel.anims[0].numFrames)
-                    testAnimTime -= testModel.anims[0].numFrames;
-            }
-            iqmAnimate(&testModel, testAnimTime);
-
-            glEnable(GL_LIGHTING);
-            glColor3f(1.0f, 1.0f, 1.0f);
-            glPushMatrix();
-            /* Place at (0, 0, -3): in Room 1, facing toward spawn point */
-            glTranslatef(0.0f, 0.0f, -3.0f);
-            glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);  /* Z-up to Y-up */
-            glScalef(0.15f, 0.15f, 0.15f);
-            glCullFace(GL_FRONT);  /* IQM has opposite winding */
-            iqmRender(&testModel);
-            glCullFace(GL_BACK);
-            glPopMatrix();
-        }
+        /* Update and render entities */
+        entUpdate(&entities, px, py, pz, dt);
+        glEnable(GL_LIGHTING);
+        glColor3f(1.0f, 1.0f, 1.0f);
+        entRender(&entities);
 
         renderGun(gunFlashTimer);
         renderCrosshair();
@@ -751,7 +741,7 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
-    if (hasTestModel) iqmFree(&testModel);
+    entListFree(&entities);
     texCacheFree(&texCache);
     physCleanup(&phys);
     objFree(&level);
