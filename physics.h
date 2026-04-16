@@ -115,6 +115,30 @@ static void physGetPlayerPos(PhysWorld *pw, float *x, float *y, float *z)
 static void physStep(PhysWorld *pw, float dt)
 {
     pw->world->stepSimulation(dt, 4, 1.0f / 120.0f);
+
+    /* Ceiling penetration correction:
+       Raycast upward from capsule center. If the ray hits geometry
+       closer than the capsule half-height, the top of the capsule
+       has punched through a surface -- push the player back down
+       so the capsule top sits at the ceiling. Runs every frame,
+       so it acts as a continuous clamp even if upward velocity persists. */
+    btTransform t = pw->ghostObject->getWorldTransform();
+    btVector3 origin = t.getOrigin();
+    float halfHeight = pw->capsuleShape->getHalfHeight()
+                     + pw->capsuleShape->getRadius();
+    btVector3 rayFrom = origin;
+    btVector3 rayTo   = origin + btVector3(0, halfHeight, 0);
+
+    btCollisionWorld::ClosestRayResultCallback rayCallback(rayFrom, rayTo);
+    rayCallback.m_collisionFilterGroup = btBroadphaseProxy::CharacterFilter;
+    rayCallback.m_collisionFilterMask  = btBroadphaseProxy::StaticFilter;
+    pw->world->rayTest(rayFrom, rayTo, rayCallback);
+
+    if (rayCallback.hasHit()) {
+        float ceilingY = rayCallback.m_hitPointWorld.getY();
+        t.setOrigin(btVector3(origin.getX(), ceilingY - halfHeight, origin.getZ()));
+        pw->ghostObject->setWorldTransform(t);
+    }
 }
 
 static void physCleanup(PhysWorld *pw)
