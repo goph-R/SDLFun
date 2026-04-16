@@ -412,24 +412,235 @@ models/
   barrel.bmp          — barrel texture
 ```
 
+## Doors
+
+Doors are a special entity type that combines visual mesh + physics collider + activation:
+
+```
+door door_01 - 10 0 5 0 mesh=door.obj tex=door.bmp open_dir=y open_amount=3 speed=2
+```
+
+Properties:
+- `open_dir`: axis of movement (`y` = slides up, `x`/`z` = slides sideways)
+- `open_amount`: how far to move (in meters)
+- `speed`: open/close speed
+- States: closed -> opening -> open -> closing -> closed
+- Activated by switches/triggers (via name/group targeting)
+- Has a Bullet rigid body collider that moves with the door
+
+In Blender: modeled as a mesh object with the door geometry. The export plugin
+detects `entity_type=door` and exports the mesh separately from the level.
+
+## Lua Scripting (Triggers)
+
+Lua 5.1 for custom trigger/event logic. Pure ANSI C89, ~200KB compiled, runs on Win98.
+
+### Integration
+
+- Vendored: `vendor/lua-5.1.5/src/` (add to build, ~20 .c files)
+- Engine exposes functions to Lua: `activate(name)`, `spawn(type, ...)`,
+  `play_sound(name)`, `set_anim(entity, anim)`, `get_player_pos()`, etc.
+- Triggers can reference a `.lua` script instead of (or in addition to) a target:
+
+```
+trigger boss_room - 30 3 0 0 size=4,4,4 script=boss_intro.lua once=1
+```
+
+### Script Example (boss_intro.lua)
+
+```lua
+function on_enter(trigger)
+    activate("boss_door_close")
+    set_anim("boss_01", "roar")
+    play_sound("boss_roar.wav")
+    wait(2.0)
+    set_anim("boss_01", "idle")
+end
+```
+
+### Implementation
+
+- `lua_bind.h`: init Lua state, register C functions, load/run scripts
+- Entity trigger checks: if `script` key present, call Lua function instead of entActivate
+- Keep it optional: if Lua is not compiled in, triggers fall back to name/group activation
+
+## Blender Export Plugin (sdlfun_export.py)
+
+### Architecture
+
+Single-file Blender addon (~600-800 lines Python), registers under `File > Export > SDLFun Level`.
+
+### Entity Identification in Blender
+
+Objects are classified by a custom property `sdlfun_type`:
+- **Not set** = level geometry (joined into the OBJ)
+- **`player`** = player spawn (Empty object, arrows display)
+- **`decoration`** = static or animated prop
+- **`enemy`** = enemy spawn point (Empty, with properties)
+- **`item`** = pickup (Empty or mesh)
+- **`trigger`** = invisible volume (Empty, cube display, scaled to trigger size)
+- **`switch`** = activatable object (mesh)
+- **`platform`** = moving platform (mesh)
+- **`door`** = door (mesh)
+
+### Custom Properties Panel
+
+The plugin adds a panel in **Object Properties > SDLFun Entity**:
+
+```
+[ SDLFun Entity ]
+  Type:         [Decoration ▼]      -- dropdown: player/decoration/item/enemy/...
+  Name:         [barrel_01   ]      -- auto-filled from object name
+  Group:        [props        ]     -- optional group for batch activation
+
+  -- Visual --
+  Model File:   [barrel.iqm   ]     -- IQM for animated, leave blank for inline OBJ
+  Texture:      [barrel.bmp   ]     -- diffuse texture
+  Scale:        [1.0          ]
+  Flip Cull:    [ ]
+  Is Static:    [✓]                 -- include in lightmap bake
+
+  -- Trigger (visible when type=Trigger) --
+  Target:       [elevator_group]
+  Trigger Once: [✓]
+  Script:       [boss_intro.lua]    -- optional Lua script
+
+  -- Enemy (visible when type=Enemy) --
+  Health:       [100           ]
+  Speed:        [3.0           ]
+  Sight Range:  [15.0          ]
+
+  -- Platform (visible when type=Platform) --
+  Start Y:      [2.0           ]
+  End Y:        [6.0           ]
+  Speed:        [2.0           ]
+
+  -- Door (visible when type=Door) --
+  Open Dir:     [Y ▼]
+  Open Amount:  [3.0           ]
+  Speed:        [2.0           ]
+
+  -- Switch (visible when type=Switch) --
+  Target:       [door_01       ]
+
+  -- Item (visible when type=Item) --
+  Item Type:    [Health ▼]          -- dropdown: health/ammo/key
+```
+
+### Viewport Overlays
+
+The plugin registers custom draw handlers for visual feedback in the 3D viewport:
+
+- **Player spawn**: blue crosshair icon
+- **Enemies**: red wireframe capsule at entity position, cone for sight range
+- **Triggers**: semi-transparent yellow box matching trigger size
+- **Items**: green wireframe diamond
+- **Platforms**: orange wireframe box with dashed line showing travel path
+- **Doors**: purple wireframe box with arrow showing open direction
+- **Switches**: cyan wireframe circle
+
+All overlays are toggled via `View > SDLFun Overlays` or a button in the N-panel.
+
+### Export Pipeline (one-click)
+
+`File > Export > SDLFun Level (.obj)`:
+
+**Dialog options:**
+- Level name (default: scene name)
+- Export path
+- Lightmap resolution: 128 / 256 / 512 (default 256)
+- Lightmap UV map name (default "Lightmap")
+- Auto-create lightmap UVs: checkbox
+- Bake lightmaps: checkbox (can disable for quick geometry-only export)
+- Copy models: checkbox (copy referenced IQM/OBJ files to export dir)
+
+**Steps:**
+
+1. **Classify objects**:
+   - No `sdlfun_type` -> level geometry
+   - With `sdlfun_type` -> entity
+   - Static decorations (`is_static=True`) -> included in lightmap bake scene
+
+2. **Prepare level geometry**:
+   - Join all geometry objects (temporarily)
+   - Ensure lightmap UV map exists (auto-create with Smart UV Project if needed)
+
+3. **Bake lightmaps** (if enabled):
+   - Set render engine to Cycles
+   - For each material/sector: create image, set as active, bake Diffuse (Direct+Indirect)
+   - Include static decoration meshes in the bake (they cast shadows, receive light)
+   - Save each as `<materialname>_lm.bmp`
+
+4. **Export level OBJ + MTL**:
+   - Standard Wavefront export with materials enabled
+   - Add custom MTL comments: `# lm_map`, `# tile_scale`, `# tile_offset`
+
+5. **Export diffuse textures**:
+   - Find Image Texture nodes in each material
+   - Convert to 24-bit BMP if not already
+
+6. **Write .ent file**:
+   - For each entity object, write one line with type, name, group, transform, properties
+   - Transform: read from object's world position/rotation
+   - Properties: read from custom properties panel
+
+7. **Copy entity models**:
+   - For each entity referencing an IQM or OBJ model file, copy it to the export directory
+   - Maintain `models/` subdirectory structure
+
+8. **Write manifest** (optional):
+   - `level.json` listing all files for easy loading/packaging
+
+### Output Structure
+
+```
+export/
+  test_level.obj            -- level geometry + lightmap UVs
+  test_level.mtl            -- material definitions
+  test_level.ent            -- entity list
+  diffuse textures:
+    brick.bmp               -- tiling diffuse (shared)
+    concrete.bmp
+  lightmaps:
+    brick_wall_lm.bmp       -- per-sector
+    concrete_floor_lm.bmp
+  models/
+    guard.iqm               -- enemy model
+    guard.bmp
+    barrel.obj              -- static prop
+    barrel.bmp
+    door.obj                -- door mesh
+    door.bmp
+  scripts/
+    boss_intro.lua          -- trigger scripts (if any)
+```
+
+### Installation
+
+1. Open Blender > Edit > Preferences > Add-ons > Install
+2. Select `sdlfun_export.py`
+3. Enable "SDLFun Level Exporter"
+4. The entity panel appears in Object Properties, export option in File > Export
+
 ## Implementation Phases
 
 ### Phase A: Code Separation
 Split main.cpp into header modules (renderer.h, input.h, audio.h, camera.h).
 No new features — just reorganization. Must still compile and work identically.
 
-### Phase B: IQM Loader + Skeletal Animation
-Add iqm.h with IQM binary loader, bone hierarchy evaluation, CPU skinning,
-and OpenGL 1.x rendering. Test with a simple animated model from Blender.
+### Phase B: IQM Loader + Skeletal Animation [DONE]
+iqm.h: IQM v2 binary loader, bone hierarchy, CPU skinning, GL 1.x rendering.
+Tested with mrfixit.iqm (1861 verts, 75 bones, idle animation).
 
-### Phase C: Entity Core
-Add entity.h with Entity struct, EntityList, create/destroy/find operations.
-Add .ent file parser. Load and render decoration entities (static OBJ meshes
-and animated IQM models). Player becomes entity index 0.
+### Phase C: Entity Core [DONE]
+entity.h: Entity struct, EntityList, .ent file parser, per-type update/render.
+Working: player spawn, decoration (OBJ + IQM), item pickup, trigger volumes,
+platform movement, switch activation with name/group targeting.
 
-### Phase D: Interactive Entities
-Add item pickup, switch activation, trigger volumes, platform movement.
-Entity-to-entity messaging via name/group targeting.
+### Phase D: Doors
+Add ENT_DOOR type: mesh + collider that slides open/closed on activation.
+Properties: open_dir (axis), open_amount, speed.
+Bullet rigid body moves with the door for proper collision.
 
 ### Phase E: Enemy AI
 Basic state machine: idle, patrol, chase, attack.
@@ -437,10 +648,18 @@ Line-of-sight raycasts via Bullet Physics.
 Simple pathfinding (waypoint-based or direct chase).
 Animation driven by AI state (idle->walk->attack->death).
 
-### Phase F: Blender Export Plugin
-Extend sdlfun_export.py to scan for entities, write .ent files,
-export entity meshes (OBJ for static, IQM for animated),
-handle static decoration lightmap workflow.
+### Phase F: Lua Scripting
+Vendor Lua 5.1.5 source (~20 C files, ANSI C89, works on Win98).
+lua_bind.h: init state, register engine functions, load/run trigger scripts.
+Triggers can reference .lua scripts for custom sequences.
+
+### Phase G: Blender Export Plugin
+sdlfun_export.py: single-file addon (~600-800 lines).
+- Custom properties panel for entity type/properties per object
+- Viewport overlays (color-coded entity visualization)
+- One-click export: OBJ+MTL + lightmap bake + .ent file + model/texture copy
+- Handles static decoration lightmap inclusion
+- See detailed specification above.
 
 ## Open Questions
 
