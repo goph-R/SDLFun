@@ -306,17 +306,12 @@ static void entUpdate(EntityList *el, float playerX, float playerY, float player
         Entity *e = &el->entities[i];
         if (!e->active) continue;
 
-        /* Update animation */
+        /* Update animation (default to looping — engine decides, not IQM flag) */
         if (e->hasAnim && e->iqmModel.numAnims > 0) {
             IqmAnim *anim = &e->iqmModel.anims[e->currentAnim];
             e->animTime += dt * e->animSpeed * anim->framerate;
-            if (anim->loop) {
-                while (e->animTime >= anim->numFrames)
-                    e->animTime -= anim->numFrames;
-            } else {
-                if (e->animTime >= anim->numFrames - 1)
-                    e->animTime = (float)(anim->numFrames - 1);
-            }
+            while (e->animTime >= anim->numFrames)
+                e->animTime -= anim->numFrames;
         }
 
         switch (e->type) {

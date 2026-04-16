@@ -21,6 +21,7 @@
 #include "texture.h"
 #include "iqm.h"
 #include "entity.h"
+#include "flashlight.h"
 #include "physics.h"
 
 #define SAMPLE_RATE 44100
@@ -598,14 +599,15 @@ int main(int argc, char *argv[])
     printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
            level.numVerts, level.numTexcoords, level.numTris, level.numMaterials);
 
-    /* Load entities (before physics, to get player spawn position) */
-    EntityList entities;
-    entListInit(&entities);
-    entLoadFile(&entities, "test_level.ent", &texCache);
+    /* Load entities (before physics, to get player spawn position)
+       Heap-allocated: EntityList is ~4MB (256 entities with inline ObjMesh+IqmModel) */
+    EntityList *entities = (EntityList *)malloc(sizeof(EntityList));
+    entListInit(entities);
+    entLoadFile(entities, "test_level.ent", &texCache);
 
     float spawnX = 0.0f, spawnY = 2.0f, spawnZ = 0.0f;
-    if (entities.playerIndex >= 0) {
-        Entity *pe = &entities.entities[entities.playerIndex];
+    if (entities->playerIndex >= 0) {
+        Entity *pe = &entities->entities[entities->playerIndex];
         spawnX = pe->posX;
         spawnY = pe->posY;
         spawnZ = pe->posZ;
@@ -620,6 +622,16 @@ int main(int argc, char *argv[])
     /* Build sector batches (sorts triangles by material) */
     objBuildSectors(&level);
 
+    /* Init dynamic lightmap flashlight (HL1-style: modifies lightmap pixels on CPU) */
+    DynLightmap dynLm;
+    int hasDynLm = 0;
+    {
+        GLuint lmTex = texCacheGet(&texCache, "lightmap.bmp", GL_CLAMP_TO_EDGE);
+        if (lmTex) {
+            hasDynLm = dynLmInit(&dynLm, "lightmap.bmp", &level, lmTex);
+        }
+    }
+
     /* Camera state */
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -627,6 +639,7 @@ int main(int argc, char *argv[])
 
     int gunFlashTimer = 0;
     int footstepTimer = 0;
+    int flashlightOn = 0;
 
     Uint32 lastTime = SDL_GetTicks();
 
@@ -646,6 +659,10 @@ int main(int argc, char *argv[])
             if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = 0;
+                }
+                if (event.key.keysym.sym == SDLK_f) {
+                    flashlightOn = !flashlightOn;
+                    printf("Flashlight: %s\n", flashlightOn ? "ON" : "OFF");
                 }
                 if (event.key.keysym.sym == SDLK_SPACE) {
                     if (phys.character->onGround()) {
@@ -717,6 +734,7 @@ int main(int argc, char *argv[])
         glClearColor(0.4f, 0.6f, 0.8f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        glEnable(GL_LIGHTING);
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
         float lp[] = { 0.0f, 10.0f, 0.0f, 1.0f };
@@ -725,13 +743,35 @@ int main(int argc, char *argv[])
         glLoadIdentity();
         glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
 
+        /* Flashlight (HL1-style: modify lightmap pixels on CPU, re-upload) */
+        if (flashlightOn && hasDynLm) {
+            float dirX = lookX - px;
+            float dirY = lookY - eyeY;
+            float dirZ = lookZ - pz;
+            float dirLen = sqrtf(dirX*dirX + dirY*dirY + dirZ*dirZ);
+            if (dirLen > 0.0001f) { dirX /= dirLen; dirY /= dirLen; dirZ /= dirLen; }
+
+            float hitX, hitY, hitZ;
+            if (physRaycast(&phys, px, eyeY, pz, dirX, dirY, dirZ, 30.0f,
+                            &hitX, &hitY, &hitZ)) {
+                dynLmUpdate(&dynLm, hitX, hitY, hitZ,
+                            3.0f,           /* radius in meters */
+                            1.0f,           /* intensity */
+                            1.0f, 0.95f, 0.8f); /* warm white color */
+            } else {
+                dynLmRestore(&dynLm);
+            }
+        } else if (hasDynLm) {
+            dynLmRestore(&dynLm);
+        }
+
         renderLevelSectored(&level, &texCache);
 
         /* Update and render entities */
-        entUpdate(&entities, px, py, pz, dt);
+        entUpdate(entities, px, py, pz, dt);
         glEnable(GL_LIGHTING);
         glColor3f(1.0f, 1.0f, 1.0f);
-        entRender(&entities);
+        entRender(entities);
 
         renderGun(gunFlashTimer);
         renderCrosshair();
@@ -741,7 +781,9 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
-    entListFree(&entities);
+    if (hasDynLm) dynLmFree(&dynLm);
+    entListFree(entities);
+    free(entities);
     texCacheFree(&texCache);
     physCleanup(&phys);
     objFree(&level);

@@ -112,6 +112,28 @@ static void physGetPlayerPos(PhysWorld *pw, float *x, float *y, float *z)
     *z = p.getZ();
 }
 
+/* Raycast from a point in a direction. Returns 1 if hit, fills hitPos.
+   maxDist = maximum ray length. */
+static int physRaycast(PhysWorld *pw, float fromX, float fromY, float fromZ,
+                       float dirX, float dirY, float dirZ, float maxDist,
+                       float *hitX, float *hitY, float *hitZ)
+{
+    btVector3 from(fromX, fromY, fromZ);
+    btVector3 to(fromX + dirX * maxDist, fromY + dirY * maxDist, fromZ + dirZ * maxDist);
+
+    btCollisionWorld::ClosestRayResultCallback ray(from, to);
+    ray.m_collisionFilterMask = btBroadphaseProxy::StaticFilter;
+    pw->world->rayTest(from, to, ray);
+
+    if (ray.hasHit()) {
+        *hitX = ray.m_hitPointWorld.getX();
+        *hitY = ray.m_hitPointWorld.getY();
+        *hitZ = ray.m_hitPointWorld.getZ();
+        return 1;
+    }
+    return 0;
+}
+
 static void physStep(PhysWorld *pw, float dt)
 {
     pw->world->stepSimulation(dt, 4, 1.0f / 120.0f);
