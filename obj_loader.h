@@ -149,7 +149,7 @@ static int objLoad(ObjMesh *m, const char *filename)
         else if (line[0] == 'v' && line[1] == 't' && line[2] == ' ') {
             float u, v;
             sscanf(line + 3, "%f %f", &u, &v);
-            objAddTexcoord(m, u, v);
+            objAddTexcoord(m, u, 1.0f - v);
         }
         else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ') {
             float x, y, z;

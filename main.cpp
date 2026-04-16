@@ -57,9 +57,9 @@ static void initMultitexture(void)
     const char *extensions = (const char *)glGetString(GL_EXTENSIONS);
     if (extensions && strstr(extensions, "GL_ARB_multitexture")) {
         p_MT_ActiveTexture = (PFN_MT_ActiveTexture)
-            SDL_GL_GetProcAddress("MT_ActiveTexture");
+            SDL_GL_GetProcAddress("glActiveTextureARB");
         p_MT_MultiTexCoord2f = (PFN_MT_MultiTexCoord2f)
-            SDL_GL_GetProcAddress("MT_MultiTexCoord2f");
+            SDL_GL_GetProcAddress("glMultiTexCoord2fARB");
         if (p_MT_ActiveTexture && p_MT_MultiTexCoord2f) {
             hasMultitexture = 1;
             printf("Multitexture: supported\n");
