@@ -673,6 +673,105 @@ No spotlight cone needed — just a point light that teleports to where you look
 Attenuation handles the natural light circle falloff. Works on both level geometry
 (via GL fixed-function lighting) and entities (via the point light sampling above).
 
+## Particle System + Dynamic Hardware Lights
+
+### Particles (billboarded quads)
+
+Simple CPU particles — no physics, no collision. Each particle is a camera-facing
+quad rendered with additive blending.
+
+```c
+struct Particle {
+    float posX, posY, posZ;
+    float velX, velY, velZ;
+    float r, g, b, alpha;
+    float life;             /* remaining lifetime in seconds */
+    float maxLife;          /* for fade calculation */
+    float size;
+};
+
+#define MAX_PARTICLES 512
+
+struct ParticleEmitter {
+    float posX, posY, posZ;
+    float colorR, colorG, colorB;
+    float rate;             /* bursts per second */
+    int burstCount;         /* particles per burst */
+    float particleLife;     /* lifetime per particle */
+    float particleSpeed;    /* initial velocity magnitude */
+    float particleSize;
+    int emitterType;        /* 0=electric, 1=fire, 2=smoke, 3=sparks */
+    float timer;            /* internal timer for burst rate */
+};
+```
+
+**Rendering:**
+```c
+glDepthMask(GL_FALSE);          /* don't write depth (transparent) */
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE);  /* additive blend = glow */
+glDisable(GL_LIGHTING);
+
+for each alive particle:
+    /* Billboard: extract right and up vectors from modelview matrix */
+    glPushMatrix();
+    glTranslatef(p.pos);
+    /* Zero out rotation columns to face camera */
+    glColor4f(p.r, p.g, p.b, p.alpha * (p.life / p.maxLife));
+    draw_quad(p.size);
+    glPopMatrix();
+
+glDepthMask(GL_TRUE);
+glDisable(GL_BLEND);
+```
+
+### Dynamic Hardware Lights
+
+OpenGL 1.x guarantees 8 lights (GL_LIGHT0 through GL_LIGHT7).
+- GL_LIGHT0: level ambient/directional (already used)
+- GL_LIGHT1: flashlight (raycast-based)
+- GL_LIGHT2-7: up to 6 dynamic lights for particle emitters, muzzle flash, etc.
+
+Dynamic lights are **not baked** — they affect level geometry and entities in
+real-time via the fixed-function pipeline.
+
+**Per-emitter light:**
+```c
+/* Electric spark emitter: light flickers on during burst */
+if (emitter.bursting) {
+    glEnable(GL_LIGHT2 + lightIndex);
+    float pos[] = { emitter.posX, emitter.posY, emitter.posZ, 1.0f };
+    float col[] = { emitter.colorR, emitter.colorG, emitter.colorB, 1.0f };
+    glLightfv(GL_LIGHT2 + lightIndex, GL_POSITION, pos);
+    glLightfv(GL_LIGHT2 + lightIndex, GL_DIFFUSE, col);
+    glLightf(GL_LIGHT2 + lightIndex, GL_QUADRATIC_ATTENUATION, 0.05f);
+} else {
+    glDisable(GL_LIGHT2 + lightIndex);
+}
+```
+
+**Limit: 6 simultaneous dynamic lights.** For a retro engine with small levels,
+this is plenty. If more emitters exist than available lights, prioritize by
+distance to camera.
+
+### Emitter Types
+
+| Type | Behavior | Light |
+|---|---|---|
+| electric | Short bursts of bright particles, random spread | Cyan flicker |
+| fire | Upward drift, orange-yellow, longer life | Warm orange steady |
+| smoke | Slow upward drift, gray, large, no light | None |
+| sparks | Fast downward spray, yellow-white, very short | Bright white flash |
+| muzzle | Single burst at gun barrel on shoot | White flash, 1 frame |
+
+### .ent File
+
+```
+# Particle emitters
+particle sparks_01 electric_fx 10 3 5 0 type=electric color=0.5,0.8,1.0 rate=3 burst=8 speed=4 life=0.2 size=0.05 radius=5
+particle torch_01 - 5 3.5 0 0 type=fire color=1.0,0.6,0.2 rate=10 burst=3 speed=1.5 life=0.8 size=0.1 radius=4
+```
+
 ## Implementation Phases
 
 ### Phase B: IQM Loader + Skeletal Animation [DONE]
@@ -698,23 +797,28 @@ sdlfun_export.py: single-file addon (~600-800 lines).
 - Emissive flag for fullbright objects (monitor screens)
 - Flashlight: raycast + pull-back point light, toggle with F key
 
-### Phase F: Doors
+### Phase F: Particles + Dynamic Lights
+particle.h: emitter types (electric, fire, smoke, sparks), billboarded
+quad rendering with additive blend, GL_LIGHT2-7 for dynamic lights
+that flicker with emitter bursts. Muzzle flash becomes a particle burst.
+
+### Phase G: Doors
 Add ENT_DOOR type: mesh + collider that slides open/closed on activation.
 Properties: open_dir (axis), open_amount, speed.
 Bullet rigid body moves with the door for proper collision.
 
-### Phase G: Enemy AI
+### Phase H: Enemy AI
 Basic state machine: idle, patrol, chase, attack.
 Line-of-sight raycasts via Bullet Physics.
 Simple pathfinding (waypoint-based or direct chase).
 Animation driven by AI state (idle->walk->attack->death).
 
-### Phase H: Lua Scripting
+### Phase I: Lua Scripting
 Vendor Lua 5.1.5 source (~20 C files, ANSI C89, works on Win98).
 lua_bind.h: init state, register engine functions, load/run trigger scripts.
 Triggers can reference .lua scripts for custom sequences.
 
-### Phase I: Code Separation
+### Phase J: Code Separation
 Split main.cpp into header modules (renderer.h, input.h, audio.h, camera.h).
 Refactor once the feature set is more stable. No new features — just cleanup.
 
