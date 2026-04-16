@@ -10,3 +10,8 @@ stdout.txt
 
 # Downloaded installers
 ms3d184setup.exe
+
+# Win10 build - portable MinGW (download separately, ~250MB)
+vendor_win10/mingw32/
+vendor_win10/SDL.dll
+libwinpthread-1.dll
