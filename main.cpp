@@ -194,6 +194,30 @@ static void glLookAt(float eyeX, float eyeY, float eyeZ,
     glTranslatef(-eyeX, -eyeY, -eyeZ);
 }
 
+/* ---- Tiling UV computation (Quake-style box mapping) ---- */
+
+static void computeTilingUV(Vec3 *pos, Vec3 *normal, float scale,
+                            float offU, float offV, float *ou, float *ov)
+{
+    float ax = normal->x; if (ax < 0) ax = -ax;
+    float ay = normal->y; if (ay < 0) ay = -ay;
+    float az = normal->z; if (az < 0) az = -az;
+
+    if (ay >= ax && ay >= az) {
+        /* floor/ceiling: project onto XZ */
+        *ou = pos->x * scale + offU;
+        *ov = pos->z * scale + offV;
+    } else if (ax >= az) {
+        /* left/right wall: project onto ZY */
+        *ou = pos->z * scale + offU;
+        *ov = pos->y * scale + offV;
+    } else {
+        /* front/back wall: project onto XY */
+        *ou = pos->x * scale + offU;
+        *ov = pos->y * scale + offV;
+    }
+}
+
 /* ---- Level rendering ---- */
 
 static void setColorByNormal(Vec3 *n)
@@ -279,6 +303,111 @@ static void renderLevel(ObjMesh *mesh, GLuint diffuseTex, GLuint lightmapTex)
     }
     if (hasDiffuse) {
         glDisable(GL_TEXTURE_2D);
+    }
+}
+
+/* ---- Sectored level rendering (multi-material + per-sector lightmaps) ---- */
+
+static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
+{
+    /* Backward compat: no sectors -> use legacy single-texture path */
+    if (mesh->numSectors == 0) {
+        GLuint diffTex = texCacheGet(cache, "diffuse.bmp", GL_CLAMP_TO_EDGE);
+        GLuint lmTex  = texCacheGet(cache, "lightmap.bmp", GL_CLAMP_TO_EDGE);
+        renderLevel(mesh, diffTex, lmTex);
+        return;
+    }
+
+    for (int s = 0; s < mesh->numSectors; s++) {
+        Sector *sec = &mesh->sectors[s];
+        Material *mat = NULL;
+        GLuint diffTex = 0;
+        GLuint lmTex = 0;
+        float tileScale = 1.0f;
+
+        if (sec->materialId >= 0 && sec->materialId < mesh->numMaterials) {
+            mat = &mesh->materials[sec->materialId];
+            diffTex = texCacheGet(cache, mat->diffusePath, GL_REPEAT);
+            lmTex   = texCacheGet(cache, mat->lightmapPath, GL_CLAMP_TO_EDGE);
+            tileScale = mat->tilingScale;
+        }
+
+        float tileOffU = mat ? mat->tilingOffsetX : 0.0f;
+        float tileOffV = mat ? mat->tilingOffsetY : 0.0f;
+        int hasDiffuse = (diffTex != 0);
+        int hasLM = (lmTex != 0 && hasMultitexture && mesh->numTexcoords > 0);
+
+        /* Set up texture units */
+        if (hasDiffuse) {
+            if (hasLM) {
+                MT_ActiveTexture(GL_TEXTURE0_ARB);
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, diffTex);
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+                MT_ActiveTexture(GL_TEXTURE1_ARB);
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, lmTex);
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+            } else {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, diffTex);
+                glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+            }
+        }
+
+        glBegin(GL_TRIANGLES);
+        for (int i = sec->triStart; i < sec->triStart + sec->triCount; i++) {
+            Triangle *t = &mesh->tris[i];
+            Vec3 *n = (mesh->numNormals > 0 && t->n[0] >= 0 && t->n[0] < mesh->numNormals)
+                       ? &mesh->normals[t->n[0]] : NULL;
+
+            if (!hasDiffuse && n) {
+                setColorByNormal(n);
+            } else if (!hasDiffuse) {
+                glColor3f(0.5f, 0.5f, 0.5f);
+            } else {
+                glColor3f(1.0f, 1.0f, 1.0f);
+            }
+
+            for (int j = 0; j < 3; j++) {
+                Vec3 *nn = NULL;
+                if (n && t->n[j] >= 0 && t->n[j] < mesh->numNormals) {
+                    nn = &mesh->normals[t->n[j]];
+                    glNormal3f(nn->x, nn->y, nn->z);
+                }
+
+                Vec3 *v = &mesh->verts[t->v[j]];
+
+                if (hasDiffuse) {
+                    /* Diffuse: tiling UV from world position */
+                    Vec3 faceN = n ? *n : (Vec3){0, 1, 0};
+                    float du, dv;
+                    computeTilingUV(v, &faceN, tileScale, tileOffU, tileOffV, &du, &dv);
+
+                    if (hasLM && t->t[j] >= 0 && t->t[j] < mesh->numTexcoords) {
+                        Vec2 *tc = &mesh->texcoords[t->t[j]];
+                        MT_MultiTexCoord2f(GL_TEXTURE0_ARB, du, dv);
+                        MT_MultiTexCoord2f(GL_TEXTURE1_ARB, tc->u, tc->v);
+                    } else {
+                        glTexCoord2f(du, dv);
+                    }
+                }
+
+                glVertex3f(v->x, v->y, v->z);
+            }
+        }
+        glEnd();
+
+        /* Clean up texture state for this sector */
+        if (hasLM) {
+            MT_ActiveTexture(GL_TEXTURE1_ARB);
+            glDisable(GL_TEXTURE_2D);
+            MT_ActiveTexture(GL_TEXTURE0_ARB);
+        }
+        if (hasDiffuse) {
+            glDisable(GL_TEXTURE_2D);
+        }
     }
 }
 
@@ -451,19 +580,9 @@ int main(int argc, char *argv[])
     /* Init multitexture extension */
     initMultitexture();
 
-    /* Load textures (optional - falls back to colored rendering) */
-    GLuint texDiffuse = loadTexture("diffuse.bmp");
-    GLuint texLightmap = loadTexture("lightmap.bmp");
-
-    if (texDiffuse)
-        printf("Diffuse texture loaded\n");
-    else
-        printf("No diffuse.bmp found, using colored rendering\n");
-
-    if (texLightmap)
-        printf("Lightmap texture loaded\n");
-    else
-        printf("No lightmap.bmp found, lightmap disabled\n");
+    /* Texture cache (loads textures on demand) */
+    TexCache texCache;
+    texCacheInit(&texCache);
 
     /* Load level */
     ObjMesh level;
@@ -474,14 +593,17 @@ int main(int argc, char *argv[])
         SDL_Quit();
         return 1;
     }
-    printf("Level loaded: %d verts, %d texcoords, %d tris\n",
-           level.numVerts, level.numTexcoords, level.numTris);
+    printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
+           level.numVerts, level.numTexcoords, level.numTris, level.numMaterials);
 
-    /* Init physics */
+    /* Init physics BEFORE building sectors (sorting changes triangle order) */
     PhysWorld phys;
     physInit(&phys);
     physLoadLevel(&phys, &level);
     physCreatePlayer(&phys, 0.0f, 2.0f, 0.0f);
+
+    /* Build sector batches (sorts triangles by material) */
+    objBuildSectors(&level);
 
     /* Camera state */
     float yaw = 0.0f;
@@ -499,7 +621,7 @@ int main(int argc, char *argv[])
     while (running) {
         Uint32 now = SDL_GetTicks();
         float dt = (now - lastTime) / 1000.0f;
-        if (dt > 0.05f) dt = 0.05f;
+        if (dt > 0.15f) dt = 0.15f;
         lastTime = now;
 
         while (SDL_PollEvent(&event)) {
@@ -588,7 +710,7 @@ int main(int argc, char *argv[])
         glLoadIdentity();
         glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
 
-        renderLevel(&level, texDiffuse, texLightmap);
+        renderLevelSectored(&level, &texCache);
 
         renderGun(gunFlashTimer);
         renderCrosshair();
@@ -598,8 +720,7 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
-    if (texDiffuse) glDeleteTextures(1, &texDiffuse);
-    if (texLightmap) glDeleteTextures(1, &texLightmap);
+    texCacheFree(&texCache);
     physCleanup(&phys);
     objFree(&level);
 

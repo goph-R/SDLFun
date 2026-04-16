@@ -22,31 +22,47 @@ How to create levels with diffuse textures and baked lightmaps for the SDLFun FP
    - `Mesh` > `Normals` > `Recalculate Outside`, then `Flip` if needed
    - You can display normals via Overlays > Face Orientation (blue = front, red = back)
 
-## Step 2: UV Unwrap for Diffuse Texture
+## Step 2: Materials and Tiling Textures
+
+### Assigning Materials (Sectors)
+
+Each material in Blender becomes a **sector** in the engine. Faces sharing the same material
+are batched together and share a diffuse texture + lightmap.
+
+1. Create materials for different surface types (e.g., `brick_wall`, `concrete_floor`, `metal_door`)
+2. In Edit Mode, select faces and assign them to materials via the Material Properties panel
+
+### Setting Up Tiling Diffuse Textures
+
+The engine computes diffuse texture coordinates from world position (box mapping), so
+textures tile automatically without UV unwrapping. To preview this in Blender:
+
+1. In the **Shader Editor** for each material, set up this node chain:
+   ```
+   [Texture Coordinate] --Object--> [Mapping] --Vector--> [Image Texture] --Color--> [Principled BSDF]
+   ```
+2. On the **Mapping** node:
+   - **Scale** controls tiling density (1.0 = one repeat per meter, same as `tile_scale 1.0`)
+   - **Location** controls texture offset (same as `tile_offset` in MTL)
+3. On the **Image Texture** node, load your tiling texture (brick, concrete, etc.)
+4. Switch viewport to Material Preview to see the tiling
+
+### Single-Material Levels (Simple Mode)
+
+If you don't use materials (no `mtllib`/`usemtl` in the OBJ), the engine falls back to
+loading `diffuse.bmp` and `lightmap.bmp` from the game directory. This is the original
+behavior - one texture atlas for the whole level.
+
+## Step 3: UV Unwrap for Lightmap
+
+The OBJ's UV coordinates are used **only for the lightmap**, not for diffuse textures.
 
 1. Select your level object, enter Edit Mode
 2. Select All (`A`)
-3. `UV` > `Smart UV Project` (good default for architectural geometry)
+3. `UV` > `Smart UV Project`
    - Angle Limit: 66 degrees works well
-   - Island Margin: 0.01
+   - Island Margin: 0.02 - 0.03 (prevents bleeding between UV islands)
 4. Open UV Editor to verify the unwrap looks reasonable
-5. This UV map is used for the diffuse (wall/floor) texture
-
-## Step 3: Create the Diffuse Texture
-
-Option A - Paint in Blender:
-1. Switch to Texture Paint workspace
-2. Create a new image (e.g., 512x512 or 1024x1024)
-3. Paint your wall, floor, ceiling textures directly
-
-Option B - Use tiling textures:
-1. Find or create tileable textures (brick, concrete, metal, etc.)
-2. Assign materials with these textures to different faces
-3. Bake the combined result (see Step 5)
-
-Option C - Simple color materials:
-1. Assign different colored materials to walls, floors, ceilings, slopes
-2. Bake to texture (see Step 5)
 
 ## Step 4: Set Up Lighting for Lightmap
 
@@ -61,22 +77,27 @@ Option C - Simple color materials:
 
 ## Step 5: Bake Textures
 
-### Bake Diffuse
+### Important: All materials need bake setup
+
+For every material on your level object, you must add an Image Texture node in the Shader
+Editor that is **selected (highlighted)** but **NOT connected** to anything. This tells
+Blender where to bake to.
+
+### Bake Diffuse (Single-Material Mode)
 
 1. Select your level object
-2. In Properties > Material, make sure materials are set up
-3. Create a new Image in the UV Editor (e.g., `diffuse` 1024x1024)
-4. In each material's shader node tree, add an Image Texture node
+2. Create a new Image in the UV Editor (e.g., `diffuse` 1024x1024)
+3. In each material's shader node tree, add an Image Texture node
    - Select the `diffuse` image
    - **Make sure this node is selected (highlighted)** but NOT connected
-5. Properties > Render > Bake:
+4. Properties > Render > Bake:
    - Bake Type: `Diffuse`
    - Under Influence, check only `Color` (uncheck Direct, Indirect)
    - Click `Bake`
-6. Save the image: Image Editor > Image > Save As > **BMP format**
+5. Save the image: Image Editor > Image > Save As > **BMP format**
    - Save as `diffuse.bmp` in your SDLFun folder
 
-### Bake Lightmap
+### Bake Lightmap (Single-Material Mode)
 
 1. Create another new Image in UV Editor (e.g., `lightmap` 512x512 or 1024x1024)
 2. In each material's shader node tree, select the Image Texture node
@@ -89,7 +110,18 @@ Option C - Simple color materials:
    - Click `Bake`
 4. Save as `lightmap.bmp` in your SDLFun folder
 
+### Bake Per-Sector Lightmaps (Multi-Material Mode)
+
+When using multiple materials, bake a separate lightmap for each material/sector:
+
+1. For each material, create a lightmap image (e.g., `brick_wall_lm` at 256x256 or 512x512)
+2. In each material's shader nodes, add an Image Texture node with that material's lightmap image selected
+3. Bake with Diffuse > Direct + Indirect (no Color) as above
+4. Save each as `<materialname>_lm.bmp` (this matches the engine's naming convention)
+
 ## Step 6: Export OBJ
+
+### Single-Material Export
 
 1. Select your level object
 2. `File` > `Export` > `Wavefront (.obj)`
@@ -102,15 +134,62 @@ Option C - Simple color materials:
    - Uncheck: `Write Materials` (we handle textures ourselves)
 4. Save as `test_level.obj` (or your level name) in the SDLFun folder
 
+### Multi-Material Export
+
+1. Select your level object
+2. `File` > `Export` > `Wavefront (.obj)`
+3. Export settings:
+   - Check: `Selection Only`
+   - Check: `Write Normals`
+   - Check: `Include UVs`
+   - **Check: `Write Materials`** (enables mtllib/usemtl in the OBJ)
+   - Forward: `-Z Forward`
+   - Up: `Y Up`
+4. Save as `test_level.obj` in the SDLFun folder
+5. Edit the generated `.mtl` file to add engine-specific properties:
+
+```
+newmtl brick_wall
+map_Kd brick.bmp
+# lm_map brick_wall_lm.bmp
+# tile_scale 0.5
+# tile_offset 0.0 0.0
+
+newmtl concrete_floor
+map_Kd concrete.bmp
+# lm_map concrete_floor_lm.bmp
+# tile_scale 1.0
+# tile_offset 0.25 0.1
+```
+
+### MTL Custom Properties
+
+| Property | Format | Default | Description |
+|---|---|---|---|
+| `map_Kd` | `map_Kd filename.bmp` | (none) | Tiling diffuse texture (GL_REPEAT) |
+| `# lm_map` | `# lm_map filename.bmp` | `<name>_lm.bmp` | Per-sector lightmap (GL_CLAMP_TO_EDGE) |
+| `# tile_scale` | `# tile_scale 0.5` | `1.0` | Texture repeats per world unit |
+| `# tile_offset` | `# tile_offset 0.25 0.1` | `0.0 0.0` | UV offset (matches Blender Mapping > Location) |
+
 ## Step 7: Run the Game
+
+### Single-Material Mode
 
 Place these files in the SDLFun folder:
 - `test_level.obj` - the level geometry with UVs
 - `diffuse.bmp` - the wall/floor texture atlas (24-bit BMP)
 - `lightmap.bmp` - the baked lighting (24-bit BMP)
 
-The engine automatically loads `diffuse.bmp` and `lightmap.bmp` if present.
-Without them, it falls back to colored rendering with dynamic OpenGL lighting.
+### Multi-Material Mode
+
+Place these files in the SDLFun folder:
+- `test_level.obj` - geometry with `mtllib` reference
+- `test_level.mtl` - material definitions
+- Tiling diffuse textures (e.g., `brick.bmp`, `concrete.bmp`)
+- Per-sector lightmaps (e.g., `brick_wall_lm.bmp`, `concrete_floor_lm.bmp`)
+
+The engine automatically detects whether materials are present and switches between
+single-texture and sector-based rendering.
 
 ## Tips
 
@@ -122,6 +201,8 @@ Without them, it falls back to colored rendering with dynamic OpenGL lighting.
 - **Test often**: Export and run the game to check scale and feel
 - **Lightmap resolution**: Lower res (256x256) gives a softer, more retro look
 - **BMP format**: Save as 24-bit, uncompressed. The engine does not support RLE or other compression
+- **UV island margin**: Set to 0.02-0.03 in Smart UV Project to prevent texture bleeding
+- **VRAM budget (32MB GPU)**: ~24MB for textures. Small tiling textures (128x128) + per-sector lightmaps (256x256) fit easily for 10+ rooms
 
 ## File Format Notes
 
@@ -130,5 +211,7 @@ The engine reads standard Wavefront OBJ with these features:
 - Texture coordinates (`vt u v`)
 - Normals (`vn x y z`)
 - Faces (`f v/vt/vn v/vt/vn v/vt/vn`) - triangles and quads (auto-triangulated)
+- Material library (`mtllib filename.mtl`) - optional, enables multi-material mode
+- Material switch (`usemtl name`) - assigns faces to materials/sectors
 
 Both BMP (24/32-bit) and TGA (24/32-bit uncompressed) textures are supported.
