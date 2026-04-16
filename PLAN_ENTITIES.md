@@ -622,11 +622,58 @@ export/
 3. Enable "SDLFun Level Exporter"
 4. The entity panel appears in Object Properties, export option in File > Export
 
-## Implementation Phases
+## Lighting System
 
-### Phase A: Code Separation
-Split main.cpp into header modules (renderer.h, input.h, audio.h, camera.h).
-No new features — just reorganization. Must still compile and work identically.
+### Level Geometry
+Already handled by baked lightmaps (no change needed).
+
+### Entity Lighting (flat color per model)
+No per-vertex normals needed. For each visible entity, sample nearby lights and
+set one `glColor3f` before rendering. Half-Life 1 did the same — sample lightmap
+at entity's feet, use as flat ambient.
+
+**Light data** stored in `.ent` file:
+```
+dir_light ambient - 0 0 0 0 color=0.3,0.3,0.35 dir=-0.5,-1,0.3
+point_light office_lamp - 20 4 0 0 color=0.6,0.6,0.8 radius=10
+point_light hallway_lamp - 5 3 0 0 color=1.0,0.8,0.4 radius=8
+```
+
+**Per-entity color each frame:**
+```
+base = dir_light ambient color
+for each point_light within radius:
+    atten = 1.0 - (dist / radius)
+    base += light.color * atten
+glColor3f(clamp(base))
+```
+
+### Emissive Entities
+For glowing objects (monitor screens, lamps): `emissive=1` property.
+Skip `GL_LIGHTING` when rendering — texture color shows at full brightness.
+
+```
+decoration monitor_01 office 20 3.4 -2 0 mesh=models/monitor.obj tex=models/office.bmp static=1 emissive=1
+```
+
+### Flashlight (raycast-based, Half-Life 1 style)
+1. Raycast from camera position in look direction (Bullet `rayTest`)
+2. Hit point on wall = where flashlight lands
+3. Pull back ~0.5m along the ray from the hit
+4. Place `GL_LIGHT1` as a point light at that position
+5. Toggle with `F` key
+
+```
+Player                  Light    Wall
+  O ----raycast----------*--------| hit
+                     (pull back)
+```
+
+No spotlight cone needed — just a point light that teleports to where you look.
+Attenuation handles the natural light circle falloff. Works on both level geometry
+(via GL fixed-function lighting) and entities (via the point light sampling above).
+
+## Implementation Phases
 
 ### Phase B: IQM Loader + Skeletal Animation [DONE]
 iqm.h: IQM v2 binary loader, bone hierarchy, CPU skinning, GL 1.x rendering.
@@ -637,29 +684,39 @@ entity.h: Entity struct, EntityList, .ent file parser, per-type update/render.
 Working: player spawn, decoration (OBJ + IQM), item pickup, trigger volumes,
 platform movement, switch activation with name/group targeting.
 
-### Phase D: Doors
-Add ENT_DOOR type: mesh + collider that slides open/closed on activation.
-Properties: open_dir (axis), open_amount, speed.
-Bullet rigid body moves with the door for proper collision.
-
-### Phase E: Enemy AI
-Basic state machine: idle, patrol, chase, attack.
-Line-of-sight raycasts via Bullet Physics.
-Simple pathfinding (waypoint-based or direct chase).
-Animation driven by AI state (idle->walk->attack->death).
-
-### Phase F: Lua Scripting
-Vendor Lua 5.1.5 source (~20 C files, ANSI C89, works on Win98).
-lua_bind.h: init state, register engine functions, load/run trigger scripts.
-Triggers can reference .lua scripts for custom sequences.
-
-### Phase G: Blender Export Plugin
+### Phase D: Blender Export Plugin  <-- NEXT
 sdlfun_export.py: single-file addon (~600-800 lines).
 - Custom properties panel for entity type/properties per object
 - Viewport overlays (color-coded entity visualization)
 - One-click export: OBJ+MTL + lightmap bake + .ent file + model/texture copy
 - Handles static decoration lightmap inclusion
 - See detailed specification above.
+
+### Phase E: Lighting System
+- Light definitions in .ent (dir_light, point_light)
+- Per-entity flat color sampling from nearby lights
+- Emissive flag for fullbright objects (monitor screens)
+- Flashlight: raycast + pull-back point light, toggle with F key
+
+### Phase F: Doors
+Add ENT_DOOR type: mesh + collider that slides open/closed on activation.
+Properties: open_dir (axis), open_amount, speed.
+Bullet rigid body moves with the door for proper collision.
+
+### Phase G: Enemy AI
+Basic state machine: idle, patrol, chase, attack.
+Line-of-sight raycasts via Bullet Physics.
+Simple pathfinding (waypoint-based or direct chase).
+Animation driven by AI state (idle->walk->attack->death).
+
+### Phase H: Lua Scripting
+Vendor Lua 5.1.5 source (~20 C files, ANSI C89, works on Win98).
+lua_bind.h: init state, register engine functions, load/run trigger scripts.
+Triggers can reference .lua scripts for custom sequences.
+
+### Phase I: Code Separation
+Split main.cpp into header modules (renderer.h, input.h, audio.h, camera.h).
+Refactor once the feature set is more stable. No new features — just cleanup.
 
 ## Open Questions
 
