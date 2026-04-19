@@ -9,11 +9,11 @@ decoration mrfixit_01 props 0 0 -3 0 iqm=models/mrfixit.iqm scale=0.15 flip_cull
 
 # Workstation in Room 1 (desk with CRT, keyboard, tower PC, and chair)
 # Desk origin is bottom-center; monitor+keyboard sit on desk top (assumed ~0.75m high)
-decoration office_desk_01   props -2.7  0     -3   0   mesh=models/office-desk.obj        tex=models/wood1.bmp  collide=box
-#decoration crt_monitor_01   props -2.9  0.66  -3.2 0   mesh=models/crt-monitor.obj        tex=models/office.bmp collide=box
-#decoration keyboard_01      props -2.5  0.66  -3.2 0   mesh=models/keyboard.obj           tex=models/office.bmp collide=box
-#decoration pc_tower_01      props -2.9  0.66  -2.7 0   mesh=models/midi-tower-pc-case.obj tex=models/office.bmp collide=box
-#decoration office_chair_01  props -2    0     -3.2 200 mesh=models/office-chair.obj       tex=models/office.bmp collide=box
+decoration office_desk_01   props -2.7  0    -3   0   mesh=models/office-desk.obj        tex=models/wood1.bmp  collide=box
+decoration crt_monitor_01   props -2.9  0.8  -3.2 0   mesh=models/crt-monitor.obj        tex=models/office.bmp collide=box
+decoration keyboard_01      props -2.5  0.8  -3.2 0   mesh=models/keyboard.obj           tex=models/office.bmp collide=box
+decoration pc_tower_01      props -2.9  0.8  -2.7 0   mesh=models/midi-tower-pc-case.obj tex=models/office.bmp collide=box
+decoration office_chair_01  props -2    0    -3.2 200 mesh=models/office-chair.obj       tex=models/office.bmp collide=box
 
 # Test trigger near the ramp
 trigger ramp_zone - 11 1 0 0 size=3,3,3 target=mrfixit_02 once=0

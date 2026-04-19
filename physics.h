@@ -17,6 +17,7 @@ public:
                            btConvexShape *shape, btScalar stepHeight)
         : btKinematicCharacterController(ghost, shape, stepHeight) {}
     void zeroVerticalVelocity() { m_verticalVelocity = 0.0f; }
+    btScalar getVerticalVelocity() const { return m_verticalVelocity; }
 };
 
 struct PhysWorld {
@@ -108,12 +109,10 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     pw->ghostObject->setCollisionFlags(btCollisionObject::CF_CHARACTER_OBJECT);
 
     /* Step height: max obstacle height the controller auto-climbs without
-       jumping. Also affects drop-off behavior — the internal stepUp/stepDown
-       raises by this amount each substep, and for drops ≤ ~2×stepHeight the
-       controller snaps down instead of doing a proper free-fall. 0.15m is
-       generous enough for curbs/stairs, tight enough that walking off a
-       desk feels like a fall. */
-    float stepHeight = 0.15f;
+       jumping. 0.35m is the classic value and fine now that the player is
+       full 1.75m tall — the earlier 0.15m was compensating for the sideways
+       capsule bug where the effective player was radius-height. */
+    float stepHeight = 0.35f;
     pw->character = new FpsCharacterController(
         pw->ghostObject, pw->capsuleShape, stepHeight);
     pw->character->setGravity(btVector3(0, -9.81f, 0));
@@ -379,22 +378,27 @@ static void physStep(PhysWorld *pw, float dt)
     pw->world->rayTest(rayFrom, rayTo, rayCallback);
 
     if (rayCallback.hasHit()) {
-        /* Push the player out along the hit normal, not straight down.
-           On a flat ceiling the normal is (0,-1,0) and behavior matches the
-           old straight-down clamp. On a sloped ceiling the normal has a
-           horizontal component, so forward motion into the slope's underside
-           is deflected sideways + down instead of being clamped flush against
-           it — without this, holding W while head-bonking a slope makes the
-           player slide along its underside forever. */
+        /* Push the capsule out along the hit normal far enough that Bullet's
+           internal stepUp — which raises the capsule by stepHeight each
+           substep while vv < 0 — can't immediately re-penetrate the ceiling.
+           Without this buffer the next substep's stepDown sweep starts in
+           ceiling contact (closestHitFraction=0 → no movement, vv zeroed),
+           trapping the player against the ceiling. The buffer costs a small
+           visual snap on contact (capsule drops ~stepHeight below ceiling)
+           but keeps head-bonks robust: no sticking, no clipping through. */
         const float epsilon = 0.001f;
         btVector3 hitPoint  = rayCallback.m_hitPointWorld;
         btVector3 hitNormal = rayCallback.m_hitNormalWorld;
         float distToHit = (hitPoint - origin).length();
         float penetration = halfHeight - distToHit;
         if (penetration > 0.0f) {
-            t.setOrigin(origin + hitNormal * (penetration + epsilon));
+            float buffer = pw->character->getStepHeight() + 0.05f;
+            t.setOrigin(origin + hitNormal * (penetration + buffer));
             pw->ghostObject->setWorldTransform(t);
-            pw->character->zeroVerticalVelocity();
+            /* Kill upward velocity on contact so gravity takes over.
+               Falling velocity is left alone. */
+            if (pw->character->getVerticalVelocity() > 0.0f)
+                pw->character->zeroVerticalVelocity();
         }
     }
 }
