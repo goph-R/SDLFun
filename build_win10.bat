@@ -24,19 +24,31 @@ echo.
 set "OPTS=-O2 -Ivendor_win10\include -Ivendor\bullet3-3.25\src"
 
 REM ----------------------------------------------------------------
-REM  Compile Bullet Physics
+REM  Compile Bullet Physics (cached — delete bl.o/bc.o/bd.o to force rebuild)
 REM ----------------------------------------------------------------
-echo Compiling Bullet Linear Math...
-%GPP% %OPTS% -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o bl.o
-if errorlevel 1 goto error
+if exist bl.o (
+    echo Skipping Bullet Linear Math ^(bl.o cached^)
+) else (
+    echo Compiling Bullet Linear Math...
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o bl.o
+    if errorlevel 1 goto error
+)
 
-echo Compiling Bullet Collision...
-%GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o bc.o
-if errorlevel 1 goto error
+if exist bc.o (
+    echo Skipping Bullet Collision ^(bc.o cached^)
+) else (
+    echo Compiling Bullet Collision...
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o bc.o
+    if errorlevel 1 goto error
+)
 
-echo Compiling Bullet Dynamics...
-%GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o bd.o
-if errorlevel 1 goto error
+if exist bd.o (
+    echo Skipping Bullet Dynamics ^(bd.o cached^)
+) else (
+    echo Compiling Bullet Dynamics...
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o bd.o
+    if errorlevel 1 goto error
+)
 
 REM ----------------------------------------------------------------
 REM  Compile main

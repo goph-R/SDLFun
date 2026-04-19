@@ -45,6 +45,12 @@ struct Entity {
     int isStatic;       /* baked into lightmap, no physics update */
     int flipCull;       /* 1 = use GL_FRONT culling (flipped winding) */
 
+    /* Collision: 0 = none, 1 = static box (AABB from mesh verts). Held as
+       void* so this header doesn't need Bullet. Populated by main after
+       the physics world exists. */
+    int collide;
+    void *physBody;
+
     /* Visual: animated model (IQM) */
     int hasAnim;
     IqmModel iqmModel;
@@ -266,6 +272,10 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
                 sscanf(value, "%f,%f,%f", &e->trigger.sizeX, &e->trigger.sizeY, &e->trigger.sizeZ);
             }
             else if (strcmp(key, "once") == 0) e->trigger.once = atoi(value);
+            else if (strcmp(key, "collide") == 0) {
+                if (strcmp(value, "box") == 0) e->collide = 1;
+                else e->collide = atoi(value); /* collide=1 also works */
+            }
         }
 
         /* Load IQM animated model */

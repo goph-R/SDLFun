@@ -2,13 +2,18 @@
 # Format: type name group posX posY posZ rotY [key=value ...]
 
 # Player spawn point
-player spawn - 0 2 0 0
+player spawn - 0 1 0 0
 
 # Animated decoration: mrfixit standing in Room 1
 decoration mrfixit_01 props 0 0 -3 0 iqm=models/mrfixit.iqm scale=0.15 flip_cull=1
 
-# Another one in Room 2
-decoration mrfixit_02 props 20 2 0 90 iqm=models/mrfixit.iqm scale=0.15 flip_cull=1
+# Workstation in Room 1 (desk with CRT, keyboard, tower PC, and chair)
+# Desk origin is bottom-center; monitor+keyboard sit on desk top (assumed ~0.75m high)
+decoration office_desk_01   props -3    0     -3   0   mesh=models/office-desk.obj        tex=models/wood1.bmp  collide=box
+decoration crt_monitor_01   props -3.25 0.66  -3.2 0   mesh=models/crt-monitor.obj        tex=models/office.bmp collide=box
+decoration keyboard_01      props -2.8  0.66  -3.2 0   mesh=models/keyboard.obj           tex=models/office.bmp collide=box
+decoration pc_tower_01      props -3    0.66  -2.7 0   mesh=models/midi-tower-pc-case.obj tex=models/office.bmp collide=box
+decoration office_chair_01  props -2    0     -3.2 200 mesh=models/office-chair.obj       tex=models/office.bmp collide=box
 
 # Test trigger near the ramp
 trigger ramp_zone - 11 1 0 0 size=3,3,3 target=mrfixit_02 once=0

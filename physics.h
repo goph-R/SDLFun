@@ -9,6 +9,16 @@
 
 #include "obj_loader.h"
 
+/* Thin subclass that exposes the protected m_verticalVelocity so the
+   ceiling clamp in physStep() can cancel upward motion on impact. */
+class FpsCharacterController : public btKinematicCharacterController {
+public:
+    FpsCharacterController(btPairCachingGhostObject *ghost,
+                           btConvexShape *shape, btScalar stepHeight)
+        : btKinematicCharacterController(ghost, shape, stepHeight) {}
+    void zeroVerticalVelocity() { m_verticalVelocity = 0.0f; }
+};
+
 struct PhysWorld {
     btDefaultCollisionConfiguration *config;
     btCollisionDispatcher *dispatcher;
@@ -24,7 +34,7 @@ struct PhysWorld {
     /* Player */
     btPairCachingGhostObject *ghostObject;
     btCapsuleShape *capsuleShape;
-    btKinematicCharacterController *character;
+    FpsCharacterController *character;
 };
 
 static void physInit(PhysWorld *pw)
@@ -91,7 +101,7 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     pw->ghostObject->setCollisionFlags(btCollisionObject::CF_CHARACTER_OBJECT);
 
     float stepHeight = 0.35f;
-    pw->character = new btKinematicCharacterController(
+    pw->character = new FpsCharacterController(
         pw->ghostObject, pw->capsuleShape, stepHeight);
     pw->character->setGravity(btVector3(0, -9.81f, 0));
     pw->character->setMaxSlope(btRadians(50.0f));
@@ -110,6 +120,41 @@ static void physGetPlayerPos(PhysWorld *pw, float *x, float *y, float *z)
     *x = p.getX();
     *y = p.getY();
     *z = p.getZ();
+}
+
+/* Static box collider for decorations. hx/hy/hz are half-extents in the
+   entity's local space; the body is rotated by rotY (degrees) around Y.
+   Returns the rigid body as a void* so non-Bullet callers (entity.h) can
+   hold onto it without pulling in Bullet headers.
+   Pass the returned pointer to physRemoveStaticBox() at cleanup. */
+static void *physAddStaticBox(PhysWorld *pw,
+                              float cx, float cy, float cz,
+                              float hx, float hy, float hz,
+                              float rotY)
+{
+    btBoxShape *shape = new btBoxShape(btVector3(hx, hy, hz));
+    btTransform tr;
+    tr.setIdentity();
+    tr.setOrigin(btVector3(cx, cy, cz));
+    btQuaternion q;
+    q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
+    tr.setRotation(q);
+    btDefaultMotionState *ms = new btDefaultMotionState(tr);
+    btRigidBody::btRigidBodyConstructionInfo info(0.0f, ms, shape);
+    btRigidBody *body = new btRigidBody(info);
+    body->setFriction(0.8f);
+    pw->world->addRigidBody(body);
+    return (void *)body;
+}
+
+static void physRemoveStaticBox(PhysWorld *pw, void *bodyPtr)
+{
+    if (!bodyPtr) return;
+    btRigidBody *body = (btRigidBody *)bodyPtr;
+    pw->world->removeRigidBody(body);
+    delete body->getMotionState();
+    delete body->getCollisionShape();
+    delete body;
 }
 
 /* Raycast from a point in a direction. Returns 1 if hit, fills hitPos.
@@ -157,9 +202,23 @@ static void physStep(PhysWorld *pw, float dt)
     pw->world->rayTest(rayFrom, rayTo, rayCallback);
 
     if (rayCallback.hasHit()) {
-        float ceilingY = rayCallback.m_hitPointWorld.getY();
-        t.setOrigin(btVector3(origin.getX(), ceilingY - halfHeight, origin.getZ()));
-        pw->ghostObject->setWorldTransform(t);
+        /* Push the player out along the hit normal, not straight down.
+           On a flat ceiling the normal is (0,-1,0) and behavior matches the
+           old straight-down clamp. On a sloped ceiling the normal has a
+           horizontal component, so forward motion into the slope's underside
+           is deflected sideways + down instead of being clamped flush against
+           it — without this, holding W while head-bonking a slope makes the
+           player slide along its underside forever. */
+        const float epsilon = 0.001f;
+        btVector3 hitPoint  = rayCallback.m_hitPointWorld;
+        btVector3 hitNormal = rayCallback.m_hitNormalWorld;
+        float distToHit = (hitPoint - origin).length();
+        float penetration = halfHeight - distToHit;
+        if (penetration > 0.0f) {
+            t.setOrigin(origin + hitNormal * (penetration + epsilon));
+            pw->ghostObject->setWorldTransform(t);
+            pw->character->zeroVerticalVelocity();
+        }
     }
 }
 

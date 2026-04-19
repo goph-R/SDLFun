@@ -25,8 +25,22 @@
 #include "physics.h"
 
 #define SAMPLE_RATE 44100
-#define SCREEN_W 640
-#define SCREEN_H 480
+
+/* Screen size — defaults overridden by -w / -h command-line args. */
+static int SCREEN_W = 640;
+static int SCREEN_H = 480;
+
+/* Horizontal FOV held constant; vertical FOV is derived from the current
+   aspect ratio so wider screens show more to the sides rather than stretch.
+   H = 90° matches the classic Quake/HL1 feel at 4:3. */
+#define H_FOV_DEG 90.0f
+static float computeVFov(void)
+{
+    float hRad = H_FOV_DEG * (float)M_PI / 180.0f;
+    float aspect = (float)SCREEN_W / (float)SCREEN_H;
+    float vRad = 2.0f * atanf(tanf(hRad * 0.5f) / aspect);
+    return vRad * 180.0f / (float)M_PI;
+}
 
 /* ---- Multitexture (GL_ARB_multitexture) ---- */
 
@@ -531,6 +545,19 @@ static void renderGun(int flashTimer)
 
 int main(int argc, char *argv[])
 {
+    /* Parse -w <width> and -h <height> — anything else is ignored. */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
+            SCREEN_W = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
+            SCREEN_H = atoi(argv[++i]);
+        }
+    }
+    if (SCREEN_W < 320) SCREEN_W = 320;
+    if (SCREEN_H < 240) SCREEN_H = 240;
+    printf("Resolution: %dx%d (V-FOV %.1f deg for %d deg H-FOV)\n",
+           SCREEN_W, SCREEN_H, computeVFov(), (int)H_FOV_DEG);
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -568,7 +595,7 @@ int main(int argc, char *argv[])
     glViewport(0, 0, SCREEN_W, SCREEN_H);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glSetPerspective(60.0f, (float)SCREEN_W / SCREEN_H, 0.1f, 200.0f);
+    glSetPerspective(computeVFov(), (float)SCREEN_W / SCREEN_H, 0.1f, 200.0f);
     glMatrixMode(GL_MODELVIEW);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
@@ -627,6 +654,44 @@ int main(int argc, char *argv[])
 
     /* Build sector batches (sorts triangles by material) */
     objBuildSectors(&level);
+
+    /* Create static box colliders for decorations that opted in with
+       collide=box. AABB is computed from the mesh verts in local space,
+       scaled by the entity's scale, then placed at the entity transform
+       with rotY applied to both the center offset and the box orientation. */
+    for (int i = 0; i < entities->count; i++) {
+        Entity *e = &entities->entities[i];
+        if (!e->collide || !e->hasMesh || e->mesh.numVerts == 0) continue;
+
+        Vec3 *v0 = &e->mesh.verts[0];
+        float minX = v0->x, maxX = v0->x;
+        float minY = v0->y, maxY = v0->y;
+        float minZ = v0->z, maxZ = v0->z;
+        for (int k = 1; k < e->mesh.numVerts; k++) {
+            Vec3 *v = &e->mesh.verts[k];
+            if (v->x < minX) minX = v->x; else if (v->x > maxX) maxX = v->x;
+            if (v->y < minY) minY = v->y; else if (v->y > maxY) maxY = v->y;
+            if (v->z < minZ) minZ = v->z; else if (v->z > maxZ) maxZ = v->z;
+        }
+
+        float s = (e->scale > 0.0f) ? e->scale : 1.0f;
+        float hx = (maxX - minX) * 0.5f * s;
+        float hy = (maxY - minY) * 0.5f * s;
+        float hz = (maxZ - minZ) * 0.5f * s;
+        float lcx = (minX + maxX) * 0.5f * s;
+        float lcy = (minY + maxY) * 0.5f * s;
+        float lcz = (minZ + maxZ) * 0.5f * s;
+
+        float rad = e->rotY * (float)M_PI / 180.0f;
+        float cs = cosf(rad), sn = sinf(rad);
+        float wx = e->posX + (cs * lcx + sn * lcz);
+        float wy = e->posY + lcy;
+        float wz = e->posZ + (-sn * lcx + cs * lcz);
+
+        e->physBody = physAddStaticBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
+        printf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
+               e->name, hx*2, hy*2, hz*2, wx, wy, wz);
+    }
 
     /* Init dynamic lightmap flashlight (HL1-style: modifies lightmap pixels on CPU) */
     DynLightmap dynLm;
@@ -707,8 +772,15 @@ int main(int argc, char *argv[])
         float moveLen = sqrtf(moveX * moveX + moveZ * moveZ);
         int isMoving = 0;
         if (moveLen > 0.001f) {
-            moveX = (moveX / moveLen) * moveSpeed * dt;
-            moveZ = (moveZ / moveLen) * moveSpeed * dt;
+            /* Scale by the physics fixed timestep (1/120s), not frame dt.
+               Bullet applies setWalkDirection once per internal substep, and
+               stepSimulation runs floor(frameDt * 120) substeps. So a walk
+               vector of (speed / 120) per substep yields exactly `speed` m/s
+               over any frame rate. Using frame dt here caused the ATI/GeForce
+               machines running at high FPS to crawl. */
+            float perStep = moveSpeed * (1.0f / 120.0f);
+            moveX = (moveX / moveLen) * perStep;
+            moveZ = (moveZ / moveLen) * perStep;
             isMoving = 1;
         }
 
@@ -728,7 +800,10 @@ int main(int argc, char *argv[])
 
         float px, py, pz;
         physGetPlayerPos(&phys, &px, &py, &pz);
-        float eyeY = py + 0.6f;
+        /* Capsule center is 0.875m above the floor when grounded (halfHeight
+           0.525 + radius 0.35), so +0.755 puts the camera at 1.63m — realistic
+           eye height for a 1.75m-tall person. */
+        float eyeY = py + 0.765f;
 
         float lookX = px + forwardX;
         float lookY = eyeY + sinf(pitch * (float)M_PI / 180.0f);
@@ -743,11 +818,13 @@ int main(int argc, char *argv[])
         glEnable(GL_LIGHTING);
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
+        glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
+
+        /* Light position must be submitted AFTER the view matrix is on the
+           stack — glLightfv transforms the position by the current modelview,
+           so this anchors the light at world (0, 10, 0). */
         float lp[] = { 0.0f, 10.0f, 0.0f, 1.0f };
         glLightfv(GL_LIGHT0, GL_POSITION, lp);
-
-        glLoadIdentity();
-        glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
 
         /* Flashlight (HL1-style: modify lightmap pixels on CPU, re-upload) */
         if (flashlightOn && hasDynLm) {
@@ -788,6 +865,12 @@ int main(int argc, char *argv[])
 
     /* Cleanup */
     if (hasDynLm) dynLmFree(&dynLm);
+    for (int i = 0; i < entities->count; i++) {
+        if (entities->entities[i].physBody) {
+            physRemoveStaticBox(&phys, entities->entities[i].physBody);
+            entities->entities[i].physBody = NULL;
+        }
+    }
     entListFree(entities);
     free(entities);
     texCacheFree(&texCache);
