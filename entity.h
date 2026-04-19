@@ -22,7 +22,8 @@ enum EntityType {
     ENT_ENEMY,
     ENT_PLATFORM,
     ENT_SWITCH,
-    ENT_TRIGGER
+    ENT_TRIGGER,
+    ENT_DOOR
 };
 
 /* ---- Entity ---- */
@@ -89,6 +90,20 @@ struct Entity {
             int once;
             int triggered;
         } trigger;
+
+        struct {
+            int motion;        /* 0 = slide, 1 = rotate (around Y) */
+            int axis;          /* 0 = X, 1 = Y, 2 = Z (slide only; rotate is Y) */
+            float amount;      /* meters (slide) or degrees (rotate) */
+            float speed;       /* m/s (slide) or deg/s (rotate) */
+            int state;         /* 0 = closed, 1 = opening, 2 = open, 3 = closing */
+            float progress;    /* 0..1, 0 = closed, 1 = fully open */
+            float closedX, closedY, closedZ;
+            float closedRotY;
+            /* Cached local-space AABB center (post-scale, pre-rotation) so the
+               door's per-tick collider transform can be recomputed cheaply. */
+            float lcx, lcy, lcz;
+        } door;
     };
 };
 
@@ -147,6 +162,12 @@ static void entActivate(EntityList *el, const char *target)
                 /* Cascade: activate the switch's own target */
                 if (e->sw.target[0])
                     entActivate(el, e->sw.target);
+                break;
+            case ENT_DOOR:
+                /* Toggle: closed starts opening, open starts closing.
+                   Mid-animation activations ignored (simplest sensible behavior). */
+                if (e->door.state == 0) e->door.state = 1;
+                else if (e->door.state == 2) e->door.state = 3;
                 break;
             default:
                 break;
@@ -221,6 +242,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
         else if (strcmp(tokens[0], "platform") == 0) type = ENT_PLATFORM;
         else if (strcmp(tokens[0], "switch") == 0) type = ENT_SWITCH;
         else if (strcmp(tokens[0], "trigger") == 0) type = ENT_TRIGGER;
+        else if (strcmp(tokens[0], "door") == 0) type = ENT_DOOR;
         else { fprintf(stderr, "entity: unknown type '%s'\n", tokens[0]); continue; }
 
         int idx = entCreate(el, type);
@@ -260,7 +282,12 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
             /* Type-specific */
             else if (strcmp(key, "item_type") == 0) e->item.itemType = atoi(value);
             else if (strcmp(key, "health") == 0) e->enemy.health = atoi(value);
-            else if (strcmp(key, "speed") == 0) e->enemy.speed = (float)atof(value);
+            else if (strcmp(key, "speed") == 0) {
+                float v = (float)atof(value);
+                if (type == ENT_DOOR)          e->door.speed = v;
+                else if (type == ENT_PLATFORM) e->platform.speed = v;
+                else                           e->enemy.speed = v;
+            }
             else if (strcmp(key, "sight") == 0) e->enemy.sightRange = (float)atof(value);
             else if (strcmp(key, "start_y") == 0) e->platform.startY = (float)atof(value);
             else if (strcmp(key, "end_y") == 0) e->platform.endY = (float)atof(value);
@@ -277,6 +304,31 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
                 else if (strcmp(value, "trimesh") == 0) e->collide = 2;
                 else e->collide = atoi(value); /* collide=1 also works */
             }
+            /* Door keys */
+            else if (strcmp(key, "motion") == 0) {
+                if (strcmp(value, "rotate") == 0) e->door.motion = 1;
+                else e->door.motion = 0; /* slide */
+            }
+            else if (strcmp(key, "axis") == 0) {
+                if (value[0] == 'X' || value[0] == 'x') e->door.axis = 0;
+                else if (value[0] == 'Z' || value[0] == 'z') e->door.axis = 2;
+                else e->door.axis = 1; /* Y default */
+            }
+            else if (strcmp(key, "amount") == 0) e->door.amount = (float)atof(value);
+        }
+
+        if (type == ENT_DOOR) {
+            /* Cache the closed-state transform so the update loop can derive
+               the current transform from progress instead of accumulating
+               floating-point drift each tick. */
+            e->door.closedX = e->posX;
+            e->door.closedY = e->posY;
+            e->door.closedZ = e->posZ;
+            e->door.closedRotY = e->rotY;
+            if (e->door.speed <= 0.0f)  e->door.speed = 1.0f;
+            if (e->door.amount <= 0.0f) e->door.amount = (e->door.motion == 1) ? 90.0f : 1.0f;
+            /* Default: doors need a collider */
+            if (e->collide == 0) e->collide = 1;
         }
 
         /* Load IQM animated model */

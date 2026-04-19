@@ -190,6 +190,74 @@ static void physRemoveStaticBox(PhysWorld *pw, void *bodyPtr)
     delete body;
 }
 
+/* Kinematic box — same as static but movable. Used for doors: mass 0, but
+   CF_KINEMATIC_OBJECT so Bullet pushes dynamic/character bodies out of the
+   way when we reposition it. Remove with physRemoveStaticBox (same teardown). */
+static void *physAddKinematicBox(PhysWorld *pw,
+                                 float cx, float cy, float cz,
+                                 float hx, float hy, float hz,
+                                 float rotY)
+{
+    btBoxShape *shape = new btBoxShape(btVector3(hx, hy, hz));
+    btTransform tr;
+    tr.setIdentity();
+    tr.setOrigin(btVector3(cx, cy, cz));
+    btQuaternion q;
+    q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
+    tr.setRotation(q);
+    btDefaultMotionState *ms = new btDefaultMotionState(tr);
+    btRigidBody::btRigidBodyConstructionInfo info(0.0f, ms, shape);
+    btRigidBody *body = new btRigidBody(info);
+    body->setFriction(0.8f);
+    body->setCollisionFlags(body->getCollisionFlags()
+                            | btCollisionObject::CF_KINEMATIC_OBJECT);
+    body->setActivationState(DISABLE_DEACTIVATION);
+    pw->world->addRigidBody(body);
+    return (void *)body;
+}
+
+/* Convex-sweep from the body's current transform to (cx, cy, cz, rotY).
+   If the sweep hits anything other than the body itself, return 0 without
+   moving. Otherwise commit the new transform and return 1. Used by doors
+   to "stop if can't move" semantics — on block, the caller keeps state
+   and retries next tick. */
+struct _PhysNotMeConvexCB : public btCollisionWorld::ClosestConvexResultCallback {
+    const btCollisionObject *me;
+    _PhysNotMeConvexCB(const btCollisionObject *m,
+                       const btVector3 &from, const btVector3 &to)
+        : btCollisionWorld::ClosestConvexResultCallback(from, to), me(m) {}
+    virtual btScalar addSingleResult(btCollisionWorld::LocalConvexResult &r,
+                                     bool normalInWorld) {
+        if (r.m_hitCollisionObject == me) return btScalar(1.0);
+        return btCollisionWorld::ClosestConvexResultCallback::addSingleResult(
+            r, normalInWorld);
+    }
+};
+
+static int physMoveKinematicBox(PhysWorld *pw, void *bodyPtr,
+                                float cx, float cy, float cz, float rotY)
+{
+    if (!bodyPtr) return 0;
+    btRigidBody *body = (btRigidBody *)bodyPtr;
+    btConvexShape *shape = (btConvexShape *)body->getCollisionShape();
+
+    btTransform from = body->getWorldTransform();
+    btTransform to;
+    to.setIdentity();
+    to.setOrigin(btVector3(cx, cy, cz));
+    btQuaternion q;
+    q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
+    to.setRotation(q);
+
+    _PhysNotMeConvexCB cb(body, from.getOrigin(), to.getOrigin());
+    pw->world->convexSweepTest(shape, from, to, cb);
+    if (cb.hasHit()) return 0;
+
+    ((btDefaultMotionState *)body->getMotionState())->setWorldTransform(to);
+    body->setWorldTransform(to);
+    return 1;
+}
+
 /* Static triangle-mesh collider for decorations. Accurate for concave
    shapes (desks with kneeholes, chairs, arches). Pass the entity's
    ObjMesh directly; we copy triangles into a btTriangleMesh, apply

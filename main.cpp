@@ -513,6 +513,54 @@ static void renderGun(int flashTimer)
     glPopMatrix();
 }
 
+/* ---- Door update ----
+ * Advances each opening/closing door by speed*dt along its path. Asks the
+ * physics layer to sweep its kinematic body from current to target; if the
+ * sweep hits anything (player, decoration, other door), the door pauses
+ * this tick and retries next tick. When progress reaches 0 or 1, the door
+ * settles into the closed/open state.
+ */
+static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
+{
+    for (int i = 0; i < el->count; i++) {
+        Entity *e = &el->entities[i];
+        if (!e->active || e->type != ENT_DOOR || !e->physBody) continue;
+        if (e->door.state != 1 && e->door.state != 3) continue;
+
+        float delta = (e->door.speed * dt) / e->door.amount;
+        float target = e->door.progress + (e->door.state == 1 ? delta : -delta);
+        if (target > 1.0f) target = 1.0f;
+        if (target < 0.0f) target = 0.0f;
+
+        /* Target entity transform derived from the closed pose + progress. */
+        float nx = e->door.closedX, ny = e->door.closedY, nz = e->door.closedZ;
+        float nr = e->door.closedRotY;
+        if (e->door.motion == 0) {
+            float off = target * e->door.amount;
+            if      (e->door.axis == 0) nx += off;
+            else if (e->door.axis == 1) ny += off;
+            else                        nz += off;
+        } else {
+            nr += target * e->door.amount;
+        }
+
+        /* Collider world center = entity position + rotated local AABB offset. */
+        float rad = nr * (float)M_PI / 180.0f;
+        float cs = cosf(rad), sn = sinf(rad);
+        float cx = nx + (cs * e->door.lcx + sn * e->door.lcz);
+        float cy = ny + e->door.lcy;
+        float cz = nz + (-sn * e->door.lcx + cs * e->door.lcz);
+
+        if (physMoveKinematicBox(pw, e->physBody, cx, cy, cz, nr)) {
+            e->door.progress = target;
+            e->posX = nx; e->posY = ny; e->posZ = nz; e->rotY = nr;
+            if (target >= 1.0f) e->door.state = 2;
+            else if (target <= 0.0f) e->door.state = 0;
+        }
+        /* else: blocked, keep progress/state unchanged, try again next tick */
+    }
+}
+
 /* ---- Main ---- */
 
 int main(int argc, char *argv[])
@@ -693,9 +741,22 @@ int main(int argc, char *argv[])
         float wy = e->posY + lcy;
         float wz = e->posZ + (-sn * lcx + cs * lcz);
 
-        e->physBody = physAddStaticBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
-        printf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
-               e->name, hx*2, hy*2, hz*2, wx, wy, wz);
+        if (e->type == ENT_DOOR) {
+            /* Door uses a kinematic rigid body so updateDoors() can reposition
+               it each frame and Bullet pushes the character controller out of
+               the way. Cache the local AABB center so we can recompute the
+               world collider transform cheaply when the entity moves. */
+            e->door.lcx = lcx;
+            e->door.lcy = lcy;
+            e->door.lcz = lcz;
+            e->physBody = physAddKinematicBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
+            printf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
+                   e->name, hx*2, hy*2, hz*2);
+        } else {
+            e->physBody = physAddStaticBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
+            printf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
+                   e->name, hx*2, hy*2, hz*2, wx, wy, wz);
+        }
     }
 
     /* Init dynamic lightmap flashlight (HL1-style: modifies lightmap pixels on CPU) */
@@ -903,6 +964,7 @@ int main(int argc, char *argv[])
 
         /* Update and render entities */
         entUpdate(entities, px, py, pz, dt);
+        updateDoors(entities, &phys, dt);
         glEnable(GL_LIGHTING);
         glColor3f(1.0f, 1.0f, 1.0f);
         entRender(entities);
