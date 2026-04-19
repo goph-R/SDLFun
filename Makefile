@@ -1,8 +1,5 @@
 # Makefile for Linux - FPS Demo
-#
-# Default audio backend is FMOD (legacy). To build with OpenAL instead:
-#   make USE_OPENAL=1
-# Requires libopenal-dev on Debian/Ubuntu.
+# Requires libsdl1.2-dev, libopenal-dev.
 CPP = g++
 BIN = sdlfun
 
@@ -11,15 +8,7 @@ BULLET_CXXFLAGS = -I$(BULLET_SRC)
 BULLET_OBJS = bullet_linear_math.o bullet_collision.o bullet_dynamics.o
 
 CXXFLAGS = $(shell sdl-config --cflags) $(BULLET_CXXFLAGS) -O2
-
-ifeq ($(USE_OPENAL),1)
-    CXXFLAGS += -DUSE_OPENAL
-    LIBS = $(shell sdl-config --libs) -lGL -lopenal
-else
-    # FMOD headers only (vendor/include also has SDL/ which conflicts with system SDL)
-    CXXFLAGS += -Ivendor/include/fmod
-    LIBS = $(shell sdl-config --libs) -lGL -Lvendor/lib -lfmod
-endif
+LIBS = $(shell sdl-config --libs) -lGL -lopenal
 
 OBJ = main.o $(BULLET_OBJS)
 

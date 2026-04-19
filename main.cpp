@@ -578,11 +578,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-#ifdef USE_OPENAL
     SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + OpenAL", NULL);
-#else
-    SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + FMOD", NULL);
-#endif
     SDL_WM_GrabInput(SDL_GRAB_ON);
     SDL_ShowCursor(SDL_DISABLE);
 

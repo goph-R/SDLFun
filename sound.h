@@ -2,26 +2,21 @@
 #define SOUND_H
 
 /*
- * Audio abstraction. Default backend is FMOD 3 (the legacy Win98-friendly
- * choice). Define USE_OPENAL at compile time to switch to OpenAL — same
- * header API, different backend.
+ * OpenAL audio wrapper (OpenAL 1.1 / OpenAL Soft, LGPL).
+ * Works from Win98 (OpenAL Soft 1.9.563) up through modern Linux/Win10
+ * (OpenAL Soft 1.25.x) with a single `-lopenal` / `-lOpenAL32` link.
  *
- * Conventions:
- *   SoundBuffer — opaque handle to a loaded PCM clip
- *   SoundSystem — holds the audio device/context and source pool
- *
- *   sndInit(&sys, sampleRate)  — initialize audio subsystem
- *   sndShutdown(&sys)          — tear down audio subsystem
- *   sndMakeBuffer(pcm, numSamples, sampleRate) — create buffer from 16-bit mono PCM
- *   sndFreeBuffer(buffer)      — release a buffer
- *   sndPlay(&sys, buffer)      — fire-and-forget playback on any free source
+ * API:
+ *   sndInit(&sys, sampleRate)  — open device, make context, allocate sources
+ *   sndShutdown(&sys)          — tear down
+ *   sndMakeBuffer(pcm, numSamples, sampleRate) — 16-bit signed mono PCM
+ *   sndFreeBuffer(buffer)
+ *   sndPlay(&sys, buffer)      — fire-and-forget on any free source
  */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-#ifdef USE_OPENAL
 
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -94,62 +89,5 @@ static void sndPlay(SoundSystem *s, SoundBuffer buf)
     alSourcei(chosen, AL_BUFFER, (ALint)buf);
     alSourcePlay(chosen);
 }
-
-#else  /* ---- FMOD 3 backend ---- */
-
-#ifdef _WIN32
-#include <fmod/fmod.h>
-#else
-#include <fmod.h>
-#endif
-
-typedef FSOUND_SAMPLE *SoundBuffer;
-
-struct SoundSystem {
-    int _unused; /* FMOD 3 state is global */
-};
-
-static int sndInit(SoundSystem * /*s*/, int sampleRate)
-{
-    if (!FSOUND_Init(sampleRate, 32, 0)) {
-        fprintf(stderr, "FMOD init failed\n");
-        return 0;
-    }
-    return 1;
-}
-
-static void sndShutdown(SoundSystem * /*s*/)
-{
-    FSOUND_Close();
-}
-
-static SoundBuffer sndMakeBuffer(const short *pcm, int numSamples, int sampleRate)
-{
-    FSOUND_SAMPLE *sample = FSOUND_Sample_Alloc(FSOUND_FREE, numSamples,
-        FSOUND_16BITS | FSOUND_SIGNED | FSOUND_MONO | FSOUND_LOOP_OFF,
-        sampleRate, 255, 128, 128);
-    if (!sample) return NULL;
-    void *ptr1, *ptr2;
-    unsigned int len1, len2;
-    if (FSOUND_Sample_Lock(sample, 0, numSamples * (int)sizeof(short),
-                            &ptr1, &ptr2, &len1, &len2)) {
-        memcpy(ptr1, pcm, len1);
-        if (ptr2 && len2) memcpy(ptr2, pcm + (len1 / sizeof(short)), len2);
-        FSOUND_Sample_Unlock(sample, ptr1, ptr2, len1, len2);
-    }
-    return sample;
-}
-
-static void sndFreeBuffer(SoundBuffer buf)
-{
-    if (buf) FSOUND_Sample_Free(buf);
-}
-
-static void sndPlay(SoundSystem * /*s*/, SoundBuffer buf)
-{
-    if (buf) FSOUND_PlaySound(FSOUND_FREE, buf);
-}
-
-#endif
 
 #endif /* SOUND_H */

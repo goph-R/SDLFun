@@ -16,7 +16,7 @@ CXXINCS = -I"C:/DEV-CPP/lib/gcc/mingw32/3.4.2/include" \
           -I"vendor/include" $(BULLET_CXXFLAGS)
 
 BIN  = SDLFun.exe
-LIBS = -L"C:/DEV-CPP/lib" -L"vendor/lib" -lmingw32 -lSDLmain -lSDL -lopengl32 -lfmod
+LIBS = -L"C:/DEV-CPP/lib" -L"vendor/lib" -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
 CXXFLAGS = $(CXXINCS) -O2
 OBJ  = main.o $(BULLET_OBJS)
 

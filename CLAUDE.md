@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-SDLFun is a small FPS engine targeting the full span from **Windows 98** (Dev-C++ / MinGW 3.4, SDL 1.2, fixed-function OpenGL, FMOD 3) up to modern Linux/Windows. The "runs on a Pentium 4" constraint is deliberate and drives most architectural decisions — no C++11 features, no shaders, no modern GL, header-only modules, static-libgcc linking for the Win10 build.
+SDLFun is a small FPS engine targeting the full span from **Windows 98** (Dev-C++ / MinGW 3.4, SDL 1.2, fixed-function OpenGL, OpenAL Soft 1.9.563) up to modern Linux/Windows. The "runs on a Pentium 4" constraint is deliberate and drives most architectural decisions — no C++11 features, no shaders, no modern GL, header-only modules, static-libgcc linking for the Win10 build.
 
 ## Build commands
 
@@ -12,15 +12,12 @@ There are **four** independent build systems, each for a different target. They 
 
 | Target | Command | Output |
 |---|---|---|
-| Linux (system SDL, FMOD) | `make` | `sdlfun` |
-| Linux (system SDL, OpenAL) | `make USE_OPENAL=1` (needs `libopenal-dev`) | `sdlfun` |
-| Windows 98 / Dev-C++ (FMOD) | `build.bat` (uses `C:\Dev-Cpp\bin\g++.exe`) or open `SDLFun.dev` | `SDLFun.exe` |
-| Windows 98 / Dev-C++ (OpenAL) | `build_openal.bat` — user provides OpenAL headers + MinGW import lib in `vendor/` | `SDLFun.exe` |
-| Windows 10 (portable WinLibs MinGW, FMOD) | `build_win10.bat` | `SDLFun_w10.exe` |
-| Windows 10 (portable MinGW, OpenAL Soft) | `build_win10_openal.bat` — user provides OpenAL Soft headers/lib in `vendor_win10/` | `SDLFun_w10_openal.exe` |
-| CMake | `mkdir build && cd build && cmake .. && make` — add `-DUSE_VENDOR_SDL=ON` / `-DUSE_VENDOR_FMOD=ON` to use vendored libs | `SDLFun` |
+| Linux (system SDL) | `make` (needs `libsdl1.2-dev`, `libopenal-dev`) | `sdlfun` |
+| Windows 98 / Dev-C++ | `build.bat` (uses `C:\Dev-Cpp\bin\g++.exe`) | `SDLFun.exe` |
+| Windows 10 (portable WinLibs MinGW in `vendor_win10/`) | `build_win10.bat` | `SDLFun_w10.exe` |
+| CMake | `mkdir build && cd build && cmake .. && make` — add `-DUSE_VENDOR_SDL=ON` to use vendored SDL | `SDLFun` |
 
-Audio backend is chosen by the `USE_OPENAL` preprocessor define — see `sound.h` for the abstraction. Default is FMOD 3 (legacy, Win98-compatible). OpenAL migration plan in `docs/plan-openal.md`.
+Audio is OpenAL 1.1 / OpenAL Soft via the header-only wrapper in `sound.h`. The repo vendors `OpenAL32.dll` (1.25.1, used on Win10) and `OpenAL32-win98.dll` (1.9.563, the only release tested working on Win98 — rename to `OpenAL32.dll` before running on a Win98 target). Migration history in `docs/plan-openal.md`.
 
 Bullet is compiled from the three unity-build files `vendor/bullet3-3.25/src/btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`. These produce `bl.o`, `bc.o`, `bd.o` (batch scripts) or `bullet_linear_math.o` etc. (Makefile). Together they take ~60–90s to compile on a modern machine and ~only change when you bump the Bullet version.
 
