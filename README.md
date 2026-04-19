@@ -1,53 +1,39 @@
 # SDLFun
 
-A minimal SDL 1.2 project that runs on Windows 98 through modern Linux/Windows.
-
-## What it does
-
-Opens a 640x480 window with a dark blue background and a white rectangle. Press Escape or close the window to quit.
+A small FPS engine targeting everything from Windows 98 (Pentium 4, SDL 1.2, fixed-function OpenGL) through modern Linux and Windows. Bullet Physics, OpenAL Soft, header-only modules, no shaders.
 
 ## Building
 
-### Dev-C++ (Windows 98)
+See `CLAUDE.md` for the full build matrix and toolchain details.
 
-Open `SDLFun.dev` in Dev-C++ and press F9. The vendored SDL headers, libs, and DLL are included in the project.
+Quick reference:
+- **Linux**: `make` (needs `libsdl1.2-dev`, `libopenal-dev`) → `sdlfun`
+- **Windows 98 / Dev-C++**: `build.bat` → `SDLFun.exe`
+- **Windows 10 / portable MinGW**: `build_win10.bat` → `SDLFun_w10.exe`
+- **CMake**: `mkdir build && cd build && cmake .. && make`
 
-### CMake - modern Linux/Windows (system SDL)
+## Controls
 
-```
-mkdir build && cd build
-cmake ..
-make
-```
+WASD move, mouse look, Space jump, F flashlight, Left-click fire, Esc quit. `-w`/`-h` and `-fullscreen` CLI flags.
 
-Requires `libsdl1.2-dev` (Debian/Ubuntu) or equivalent installed.
+## Credits and licensing
 
-### CMake - using vendored SDL
+### Code
 
-```
-mkdir build && cd build
-cmake -DUSE_VENDOR_SDL=ON ..
-make
-```
+The engine source code (everything under the repo except `vendor/`, `vendor_win10/`, and the assets called out below) is open source. Licenses for bundled third-party libraries:
 
-### Makefile (Linux)
+| Library | License | Usage |
+|---|---|---|
+| SDL 1.2 | LGPL 2.1 | dynamically linked (`SDL.dll`) |
+| OpenAL Soft | LGPL 2.1 | dynamically linked (`OpenAL32.dll`) |
+| Bullet Physics | zlib | compiled from vendored source |
 
-```
-make
-```
+### Assets
 
-Requires `sdl-config` to be available (installed with `libsdl1.2-dev`).
+All art, level, and texture assets in this repository are **© Dynart**, all rights reserved. This includes, but is not limited to:
+- `test_level.obj` and its bakes (`diffuse.bmp`, `lightmap.bmp`)
+- Everything under `models/` except the exceptions below
+- Everything under `raw/` (Blender sources, GIMP sources, reference photos)
 
-## Project structure
-
-```
-SDLFun/
-  main.cpp          - source code
-  SDLFun.dev        - Dev-C++ project file
-  Makefile           - Linux makefile
-  CMakeLists.txt     - CMake build file
-  SDL.dll            - SDL runtime DLL for Windows
-  vendor/
-    include/SDL/     - SDL 1.2.15 headers
-    lib/             - SDL 1.2.15 MinGW libraries
-```
+The following assets are **not** original and are bundled under their own terms:
+- `models/mrfixit.iqm`, `models/Head.tga`, `models/Body.tga` — from Lee Salzman's IQM sample pack. See the original IQM distribution for licensing.
