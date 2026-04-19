@@ -4,11 +4,6 @@
 #include <SDL.h>
 #endif
 #include <GL/gl.h>
-#ifdef _WIN32
-#include <fmod/fmod.h>
-#else
-#include <fmod.h>
-#endif
 #include <cstdlib>
 #include <cstdio>
 #include <math.h>
@@ -17,6 +12,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#include "sound.h"
 #include "obj_loader.h"
 #include "texture.h"
 #include "iqm.h"
@@ -92,76 +88,52 @@ static void initMultitexture(void)
     }
 }
 
-/* ---- Sound helpers ---- */
+/* ---- Sound helpers ----
+ * Each generator fills a plain short[] with 16-bit signed mono PCM, then
+ * hands it to sndMakeBuffer so the backend (FMOD or OpenAL) can upload it.
+ */
 
-FSOUND_SAMPLE *createTone(int index, float freq, int length)
+static SoundBuffer createTone(float freq, int length)
 {
-    FSOUND_SAMPLE *sample = FSOUND_Sample_Alloc(index, length,
-        FSOUND_16BITS | FSOUND_SIGNED | FSOUND_MONO | FSOUND_LOOP_OFF,
-        SAMPLE_RATE, 255, 128, 128);
-    if (!sample) return NULL;
-
-    void *ptr1, *ptr2;
-    unsigned int len1, len2;
-    if (FSOUND_Sample_Lock(sample, 0, length * 2, &ptr1, &ptr2, &len1, &len2)) {
-        short *buf = (short *)ptr1;
-        int numSamples = len1 / 2;
-        for (int i = 0; i < numSamples; i++) {
-            float t = (float)i / SAMPLE_RATE;
-            float envelope = 1.0f - (float)i / numSamples;
-            buf[i] = (short)(sinf(2.0f * (float)M_PI * freq * t) * 32000.0f * envelope);
-        }
-        FSOUND_Sample_Unlock(sample, ptr1, ptr2, len1, len2);
+    short *buf = (short *)malloc(length * sizeof(short));
+    for (int i = 0; i < length; i++) {
+        float t = (float)i / SAMPLE_RATE;
+        float envelope = 1.0f - (float)i / length;
+        buf[i] = (short)(sinf(2.0f * (float)M_PI * freq * t) * 32000.0f * envelope);
     }
-    return sample;
+    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
+    free(buf);
+    return s;
 }
 
-FSOUND_SAMPLE *createGunshot(int index)
+static SoundBuffer createGunshot(void)
 {
     int length = 4410;
-    FSOUND_SAMPLE *sample = FSOUND_Sample_Alloc(index, length,
-        FSOUND_16BITS | FSOUND_SIGNED | FSOUND_MONO | FSOUND_LOOP_OFF,
-        SAMPLE_RATE, 255, 128, 128);
-    if (!sample) return NULL;
-
-    void *ptr1, *ptr2;
-    unsigned int len1, len2;
-    if (FSOUND_Sample_Lock(sample, 0, length * 2, &ptr1, &ptr2, &len1, &len2)) {
-        short *buf = (short *)ptr1;
-        int numSamples = len1 / 2;
-        for (int i = 0; i < numSamples; i++) {
-            float envelope = 1.0f - (float)i / numSamples;
-            envelope *= envelope;
-            float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
-            buf[i] = (short)(noise * 28000.0f * envelope);
-        }
-        FSOUND_Sample_Unlock(sample, ptr1, ptr2, len1, len2);
+    short *buf = (short *)malloc(length * sizeof(short));
+    for (int i = 0; i < length; i++) {
+        float envelope = 1.0f - (float)i / length;
+        envelope *= envelope;
+        float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
+        buf[i] = (short)(noise * 28000.0f * envelope);
     }
-    return sample;
+    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
+    free(buf);
+    return s;
 }
 
-FSOUND_SAMPLE *createFootstep(int index)
+static SoundBuffer createFootstep(void)
 {
     int length = 2205;
-    FSOUND_SAMPLE *sample = FSOUND_Sample_Alloc(index, length,
-        FSOUND_16BITS | FSOUND_SIGNED | FSOUND_MONO | FSOUND_LOOP_OFF,
-        SAMPLE_RATE, 200, 128, 128);
-    if (!sample) return NULL;
-
-    void *ptr1, *ptr2;
-    unsigned int len1, len2;
-    if (FSOUND_Sample_Lock(sample, 0, length * 2, &ptr1, &ptr2, &len1, &len2)) {
-        short *buf = (short *)ptr1;
-        int numSamples = len1 / 2;
-        for (int i = 0; i < numSamples; i++) {
-            float envelope = 1.0f - (float)i / numSamples;
-            float thud = sinf(2.0f * (float)M_PI * 80.0f * (float)i / SAMPLE_RATE);
-            float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
-            buf[i] = (short)((thud * 0.7f + noise * 0.3f) * 20000.0f * envelope);
-        }
-        FSOUND_Sample_Unlock(sample, ptr1, ptr2, len1, len2);
+    short *buf = (short *)malloc(length * sizeof(short));
+    for (int i = 0; i < length; i++) {
+        float envelope = 1.0f - (float)i / length;
+        float thud  = sinf(2.0f * (float)M_PI * 80.0f * (float)i / SAMPLE_RATE);
+        float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
+        buf[i] = (short)((thud * 0.7f + noise * 0.3f) * 20000.0f * envelope);
     }
-    return sample;
+    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
+    free(buf);
+    return s;
 }
 
 /* ---- OpenGL helpers ---- */
@@ -580,15 +552,15 @@ int main(int argc, char *argv[])
            SCREEN_W, SCREEN_H, fullscreen ? " fullscreen" : "",
            computeVFov(), (int)H_FOV_DEG);
 
-    if (!FSOUND_Init(SAMPLE_RATE, 32, 0)) {
-        fprintf(stderr, "FMOD init failed\n");
+    SoundSystem snd;
+    if (!sndInit(&snd, SAMPLE_RATE)) {
         SDL_Quit();
         return 1;
     }
 
-    FSOUND_SAMPLE *sndGunshot = createGunshot(FSOUND_FREE);
-    FSOUND_SAMPLE *sndFootstep = createFootstep(FSOUND_FREE);
-    FSOUND_SAMPLE *sndJump = createTone(FSOUND_FREE, 220.0f, 4410);
+    SoundBuffer sndGunshot  = createGunshot();
+    SoundBuffer sndFootstep = createFootstep();
+    SoundBuffer sndJump     = createTone(220.0f, 4410);
 
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -601,12 +573,16 @@ int main(int argc, char *argv[])
     SDL_Surface *screen = SDL_SetVideoMode(SCREEN_W, SCREEN_H, 32, videoFlags);
     if (!screen) {
         fprintf(stderr, "SDL_SetVideoMode failed: %s\n", SDL_GetError());
-        FSOUND_Close();
+        sndShutdown(&snd);
         SDL_Quit();
         return 1;
     }
 
+#ifdef USE_OPENAL
+    SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + OpenAL", NULL);
+#else
     SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + FMOD", NULL);
+#endif
     SDL_WM_GrabInput(SDL_GRAB_ON);
     SDL_ShowCursor(SDL_DISABLE);
 
@@ -644,7 +620,7 @@ int main(int argc, char *argv[])
     objInit(&level);
     if (!objLoad(&level, "test_level.obj")) {
         fprintf(stderr, "Failed to load test_level.obj\n");
-        FSOUND_Close();
+        sndShutdown(&snd);
         SDL_Quit();
         return 1;
     }
@@ -782,14 +758,14 @@ int main(int argc, char *argv[])
                 if (event.key.keysym.sym == SDLK_SPACE) {
                     if (phys.character->onGround()) {
                         phys.character->jump();
-                        if (sndJump) FSOUND_PlaySound(FSOUND_FREE, sndJump);
+                        sndPlay(&snd, sndJump);
                     }
                 }
             }
             if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     gunFlashTimer = 4;
-                    if (sndGunshot) FSOUND_PlaySound(FSOUND_FREE, sndGunshot);
+                    sndPlay(&snd, sndGunshot);
                 }
             }
             if (event.type == SDL_MOUSEMOTION) {
@@ -851,7 +827,7 @@ int main(int argc, char *argv[])
         if (isMoving && phys.character->onGround()) {
             footstepTimer -= (int)(dt * 1000);
             if (footstepTimer <= 0) {
-                if (sndFootstep) FSOUND_PlaySound(FSOUND_FREE, sndFootstep);
+                sndPlay(&snd, sndFootstep);
                 footstepTimer = 400;
             }
         } else {
@@ -959,10 +935,10 @@ int main(int argc, char *argv[])
     physCleanup(&phys);
     objFree(&level);
 
-    if (sndGunshot) FSOUND_Sample_Free(sndGunshot);
-    if (sndFootstep) FSOUND_Sample_Free(sndFootstep);
-    if (sndJump) FSOUND_Sample_Free(sndJump);
-    FSOUND_Close();
+    sndFreeBuffer(sndGunshot);
+    sndFreeBuffer(sndFootstep);
+    sndFreeBuffer(sndJump);
+    sndShutdown(&snd);
     SDL_Quit();
     return 0;
 }

@@ -12,10 +12,14 @@ There are **four** independent build systems, each for a different target. They 
 
 | Target | Command | Output |
 |---|---|---|
-| Linux (system SDL) | `make` | `sdlfun` |
-| Windows 98 / Dev-C++ | `build.bat` (uses `C:\Dev-Cpp\bin\g++.exe`) or open `SDLFun.dev` | `SDLFun.exe` |
-| Windows 10 (portable WinLibs MinGW in `vendor_win10/`) | `build_win10.bat` | `SDLFun_w10.exe` |
+| Linux (system SDL, FMOD) | `make` | `sdlfun` |
+| Linux (system SDL, OpenAL) | `make USE_OPENAL=1` (needs `libopenal-dev`) | `sdlfun` |
+| Windows 98 / Dev-C++ (FMOD) | `build.bat` (uses `C:\Dev-Cpp\bin\g++.exe`) or open `SDLFun.dev` | `SDLFun.exe` |
+| Windows 10 (portable WinLibs MinGW, FMOD) | `build_win10.bat` | `SDLFun_w10.exe` |
+| Windows 10 (portable MinGW, OpenAL Soft) | `build_win10_openal.bat` — user provides OpenAL Soft headers/lib in `vendor_win10/` | `SDLFun_w10_openal.exe` |
 | CMake | `mkdir build && cd build && cmake .. && make` — add `-DUSE_VENDOR_SDL=ON` / `-DUSE_VENDOR_FMOD=ON` to use vendored libs | `SDLFun` |
+
+Audio backend is chosen by the `USE_OPENAL` preprocessor define — see `sound.h` for the abstraction. Default is FMOD 3 (legacy, Win98-compatible). OpenAL migration plan in `docs/plan-openal.md`.
 
 Bullet is compiled from the three unity-build files `vendor/bullet3-3.25/src/btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`. These produce `bl.o`, `bc.o`, `bd.o` (batch scripts) or `bullet_linear_math.o` etc. (Makefile). Together they take ~60–90s to compile on a modern machine and ~only change when you bump the Bullet version.
 
