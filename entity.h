@@ -274,6 +274,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
             else if (strcmp(key, "once") == 0) e->trigger.once = atoi(value);
             else if (strcmp(key, "collide") == 0) {
                 if (strcmp(value, "box") == 0) e->collide = 1;
+                else if (strcmp(value, "trimesh") == 0) e->collide = 2;
                 else e->collide = atoi(value); /* collide=1 also works */
             }
         }

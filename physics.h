@@ -87,10 +87,17 @@ static void physLoadLevel(PhysWorld *pw, ObjMesh *mesh)
 static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
 {
     float playerHeight = 1.75f;
-    float playerRadius = 0.35f;
+    float playerRadius = 0.225f;  /* ~0.45m shoulder width */
     float capsuleHeight = playerHeight - 2.0f * playerRadius;
 
     pw->capsuleShape = new btCapsuleShape(playerRadius, capsuleHeight);
+
+    /* Diagnostic: what Bullet actually sees */
+    printf("[phys] capsule: radius=%.3f halfHeight=%.3f margin=%.3f upAxis=%d\n",
+           (float)pw->capsuleShape->getRadius(),
+           (float)pw->capsuleShape->getHalfHeight(),
+           (float)pw->capsuleShape->getMargin(),
+           pw->capsuleShape->getUpAxis());
 
     pw->ghostObject = new btPairCachingGhostObject();
     btTransform startTransform;
@@ -100,10 +107,32 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     pw->ghostObject->setCollisionShape(pw->capsuleShape);
     pw->ghostObject->setCollisionFlags(btCollisionObject::CF_CHARACTER_OBJECT);
 
-    float stepHeight = 0.35f;
+    /* Step height: max obstacle height the controller auto-climbs without
+       jumping. Also affects drop-off behavior — the internal stepUp/stepDown
+       raises by this amount each substep, and for drops ≤ ~2×stepHeight the
+       controller snaps down instead of doing a proper free-fall. 0.15m is
+       generous enough for curbs/stairs, tight enough that walking off a
+       desk feels like a fall. */
+    float stepHeight = 0.15f;
     pw->character = new FpsCharacterController(
         pw->ghostObject, pw->capsuleShape, stepHeight);
     pw->character->setGravity(btVector3(0, -9.81f, 0));
+
+    /* CRITICAL workaround: btKinematicCharacterController's constructor sets
+       m_up=(0,0,1) (Z-up) internally, then calls setUp(x=(1,0,0)) from the
+       default 4th arg, and setGravity(0,-9.81,0) calls setUpVector(0,1,0).
+       Each m_up change makes setUpVector() ROTATE the ghost object — once
+       Z→X, once X→Y — leaving our Y-aligned capsule tipped over onto its
+       side (along X). The capsule ends up with center at y≈radius instead
+       of halfHeight, and the X-axis collision footprint is ~1.75m wide.
+       We undo these rotations by resetting the ghost's orientation to
+       identity after init. Our capsule is already Y-aligned, the world is
+       Y-up, no rotation needed. */
+    {
+        btTransform xform = pw->ghostObject->getWorldTransform();
+        xform.setRotation(btQuaternion(0, 0, 0, 1));
+        pw->ghostObject->setWorldTransform(xform);
+    }
     pw->character->setMaxSlope(btRadians(50.0f));
     pw->character->setJumpSpeed(5.0f);
 
@@ -155,6 +184,154 @@ static void physRemoveStaticBox(PhysWorld *pw, void *bodyPtr)
     delete body->getMotionState();
     delete body->getCollisionShape();
     delete body;
+}
+
+/* Static triangle-mesh collider for decorations. Accurate for concave
+   shapes (desks with kneeholes, chairs, arches). Pass the entity's
+   ObjMesh directly; we copy triangles into a btTriangleMesh, apply
+   scale via setLocalScaling, and place/rotate with the rigid body
+   transform. Uses a separate remove function so box and trimesh
+   resources can be freed with the right delete calls. */
+struct PhysTrimeshHandle {
+    btRigidBody *body;
+    btBvhTriangleMeshShape *shape;
+    btTriangleMesh *triMesh;
+};
+
+static void *physAddStaticTrimesh(PhysWorld *pw, ObjMesh *mesh,
+                                  float cx, float cy, float cz,
+                                  float rotY, float scale)
+{
+    if (mesh->numTris == 0) return NULL;
+    btTriangleMesh *tri = new btTriangleMesh();
+    for (int i = 0; i < mesh->numTris; i++) {
+        Triangle *t = &mesh->tris[i];
+        Vec3 *a = &mesh->verts[t->v[0]];
+        Vec3 *b = &mesh->verts[t->v[1]];
+        Vec3 *c = &mesh->verts[t->v[2]];
+        tri->addTriangle(btVector3(a->x, a->y, a->z),
+                         btVector3(b->x, b->y, b->z),
+                         btVector3(c->x, c->y, c->z));
+    }
+    btBvhTriangleMeshShape *shape = new btBvhTriangleMeshShape(tri, true);
+    if (scale > 0.0f && scale != 1.0f)
+        shape->setLocalScaling(btVector3(scale, scale, scale));
+
+    btTransform tr;
+    tr.setIdentity();
+    tr.setOrigin(btVector3(cx, cy, cz));
+    btQuaternion q;
+    q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
+    tr.setRotation(q);
+    btDefaultMotionState *ms = new btDefaultMotionState(tr);
+    btRigidBody::btRigidBodyConstructionInfo info(0.0f, ms, shape);
+    btRigidBody *body = new btRigidBody(info);
+    body->setFriction(0.8f);
+    pw->world->addRigidBody(body);
+
+    PhysTrimeshHandle *h = (PhysTrimeshHandle *)malloc(sizeof(PhysTrimeshHandle));
+    h->body = body;
+    h->shape = shape;
+    h->triMesh = tri;
+    return (void *)h;
+}
+
+/* Debug: draw wireframes of every non-player collider so we can visually
+   verify collider position/orientation matches the rendered mesh. */
+static void physDebugDrawColliders(PhysWorld *pw)
+{
+    btCollisionObjectArray &objs = pw->world->getCollisionObjectArray();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0f);
+    for (int i = 0; i < objs.size(); i++) {
+        btCollisionObject *obj = objs[i];
+        if (obj == pw->ghostObject) continue;
+        btCollisionShape *shape = obj->getCollisionShape();
+        if (!shape) continue;
+
+        btTransform tr = obj->getWorldTransform();
+        btVector3 o = tr.getOrigin();
+        btMatrix3x3 m = tr.getBasis();
+        float gl[16] = {
+            m[0][0], m[1][0], m[2][0], 0,
+            m[0][1], m[1][1], m[2][1], 0,
+            m[0][2], m[1][2], m[2][2], 0,
+            o.x(),   o.y(),   o.z(),   1
+        };
+
+        glPushMatrix();
+        glMultMatrixf(gl);
+
+        int type = shape->getShapeType();
+        if (type == BOX_SHAPE_PROXYTYPE) {
+            btBoxShape *box = (btBoxShape *)shape;
+            btVector3 e = box->getHalfExtentsWithoutMargin();
+            float x = e.x(), y = e.y(), z = e.z();
+            glColor3f(1.0f, 0.3f, 0.3f); /* red for box */
+            glBegin(GL_LINES);
+            /* 12 edges of a box */
+            glVertex3f(-x,-y,-z); glVertex3f( x,-y,-z);
+            glVertex3f( x,-y,-z); glVertex3f( x,-y, z);
+            glVertex3f( x,-y, z); glVertex3f(-x,-y, z);
+            glVertex3f(-x,-y, z); glVertex3f(-x,-y,-z);
+            glVertex3f(-x, y,-z); glVertex3f( x, y,-z);
+            glVertex3f( x, y,-z); glVertex3f( x, y, z);
+            glVertex3f( x, y, z); glVertex3f(-x, y, z);
+            glVertex3f(-x, y, z); glVertex3f(-x, y,-z);
+            glVertex3f(-x,-y,-z); glVertex3f(-x, y,-z);
+            glVertex3f( x,-y,-z); glVertex3f( x, y,-z);
+            glVertex3f( x,-y, z); glVertex3f( x, y, z);
+            glVertex3f(-x,-y, z); glVertex3f(-x, y, z);
+            glEnd();
+        } else if (type == TRIANGLE_MESH_SHAPE_PROXYTYPE) {
+            /* Draw each triangle edge */
+            btBvhTriangleMeshShape *tms = (btBvhTriangleMeshShape *)shape;
+            btVector3 scale = tms->getLocalScaling();
+            btStridingMeshInterface *mi = tms->getMeshInterface();
+            const unsigned char *vbase;
+            int numVerts;
+            PHY_ScalarType vtype;
+            int vstride;
+            const unsigned char *ibase;
+            int istride;
+            int numFaces;
+            PHY_ScalarType itype;
+            int nsub = mi->getNumSubParts();
+            glColor3f(0.3f, 1.0f, 0.3f); /* green for trimesh */
+            glBegin(GL_LINES);
+            for (int sp = 0; sp < nsub; sp++) {
+                mi->getLockedReadOnlyVertexIndexBase(&vbase, numVerts, vtype,
+                    vstride, &ibase, istride, numFaces, itype, sp);
+                for (int f = 0; f < numFaces; f++) {
+                    const int *idx = (const int *)(ibase + f * istride);
+                    for (int e = 0; e < 3; e++) {
+                        const float *a = (const float *)(vbase + idx[e]       * vstride);
+                        const float *b = (const float *)(vbase + idx[(e+1)%3] * vstride);
+                        glVertex3f(a[0]*scale.x(), a[1]*scale.y(), a[2]*scale.z());
+                        glVertex3f(b[0]*scale.x(), b[1]*scale.y(), b[2]*scale.z());
+                    }
+                }
+                mi->unLockReadOnlyVertexBase(sp);
+            }
+            glEnd();
+        }
+        glPopMatrix();
+    }
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+}
+
+static void physRemoveStaticTrimesh(PhysWorld *pw, void *handlePtr)
+{
+    if (!handlePtr) return;
+    PhysTrimeshHandle *h = (PhysTrimeshHandle *)handlePtr;
+    pw->world->removeRigidBody(h->body);
+    delete h->body->getMotionState();
+    delete h->body;
+    delete h->shape;
+    delete h->triMesh;
+    free(h);
 }
 
 /* Raycast from a point in a direction. Returns 1 if hit, fills hitPos.

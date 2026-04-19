@@ -655,14 +655,29 @@ int main(int argc, char *argv[])
     /* Build sector batches (sorts triangles by material) */
     objBuildSectors(&level);
 
-    /* Create static box colliders for decorations that opted in with
-       collide=box. AABB is computed from the mesh verts in local space,
-       scaled by the entity's scale, then placed at the entity transform
-       with rotY applied to both the center offset and the box orientation. */
+    /* Create colliders for decorations that opted in with
+       collide=box (AABB from mesh verts) or collide=trimesh (exact
+       btBvhTriangleMeshShape). AABB is fast but wrong for concave
+       props (desks with kneeholes, chairs with arm gaps) because
+       it fills in the hollow space. */
     for (int i = 0; i < entities->count; i++) {
         Entity *e = &entities->entities[i];
         if (!e->collide || !e->hasMesh || e->mesh.numVerts == 0) continue;
 
+        float s = (e->scale > 0.0f) ? e->scale : 1.0f;
+
+        if (e->collide == 2) {
+            /* Trimesh: position is the entity origin; scale and rotation
+               are applied by the shape/body respectively. */
+            e->physBody = physAddStaticTrimesh(&phys, &e->mesh,
+                                               e->posX, e->posY, e->posZ,
+                                               e->rotY, s);
+            printf("entity: %s collider (trimesh %d tris at %.2f,%.2f,%.2f)\n",
+                   e->name, e->mesh.numTris, e->posX, e->posY, e->posZ);
+            continue;
+        }
+
+        /* Box: AABB of mesh verts, scaled, then rotated around entity origin. */
         Vec3 *v0 = &e->mesh.verts[0];
         float minX = v0->x, maxX = v0->x;
         float minY = v0->y, maxY = v0->y;
@@ -674,7 +689,6 @@ int main(int argc, char *argv[])
             if (v->z < minZ) minZ = v->z; else if (v->z > maxZ) maxZ = v->z;
         }
 
-        float s = (e->scale > 0.0f) ? e->scale : 1.0f;
         float hx = (maxX - minX) * 0.5f * s;
         float hy = (maxY - minY) * 0.5f * s;
         float hz = (maxZ - minZ) * 0.5f * s;
@@ -711,6 +725,7 @@ int main(int argc, char *argv[])
     int gunFlashTimer = 0;
     int footstepTimer = 0;
     int flashlightOn = 0;
+    int debugColliders = 0;
 
     Uint32 lastTime = SDL_GetTicks();
 
@@ -734,6 +749,16 @@ int main(int argc, char *argv[])
                 if (event.key.keysym.sym == SDLK_f) {
                     flashlightOn = !flashlightOn;
                     printf("Flashlight: %s\n", flashlightOn ? "ON" : "OFF");
+                }
+                if (event.key.keysym.sym == SDLK_b) {
+                    debugColliders = !debugColliders;
+                    printf("Collider wireframes: %s\n", debugColliders ? "ON" : "OFF");
+                }
+                if (event.key.keysym.sym == SDLK_p) {
+                    float _px, _py, _pz;
+                    physGetPlayerPos(&phys, &_px, &_py, &_pz);
+                    printf("player pos: X=%.3f Y=%.3f Z=%.3f  yaw=%.1f pitch=%.1f\n",
+                           _px, _py, _pz, yaw, pitch);
                 }
                 if (event.key.keysym.sym == SDLK_SPACE) {
                     if (phys.character->onGround()) {
@@ -856,6 +881,8 @@ int main(int argc, char *argv[])
         glColor3f(1.0f, 1.0f, 1.0f);
         entRender(entities);
 
+        if (debugColliders) physDebugDrawColliders(&phys);
+
         renderGun(gunFlashTimer);
         renderCrosshair();
 
@@ -866,10 +893,11 @@ int main(int argc, char *argv[])
     /* Cleanup */
     if (hasDynLm) dynLmFree(&dynLm);
     for (int i = 0; i < entities->count; i++) {
-        if (entities->entities[i].physBody) {
-            physRemoveStaticBox(&phys, entities->entities[i].physBody);
-            entities->entities[i].physBody = NULL;
-        }
+        Entity *e = &entities->entities[i];
+        if (!e->physBody) continue;
+        if (e->collide == 2) physRemoveStaticTrimesh(&phys, e->physBody);
+        else physRemoveStaticBox(&phys, e->physBody);
+        e->physBody = NULL;
     }
     entListFree(entities);
     free(entities);
