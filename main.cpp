@@ -545,23 +545,40 @@ static void renderGun(int flashTimer)
 
 int main(int argc, char *argv[])
 {
-    /* Parse -w <width> and -h <height> — anything else is ignored. */
+    /* Parse -w <width>, -h <height>, -fullscreen. Anything else ignored. */
+    int wSpecified = 0, hSpecified = 0, fullscreen = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
             SCREEN_W = atoi(argv[++i]);
+            wSpecified = 1;
         } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
             SCREEN_H = atoi(argv[++i]);
+            hSpecified = 1;
+        } else if (strcmp(argv[i], "-fullscreen") == 0) {
+            fullscreen = 1;
         }
     }
-    if (SCREEN_W < 320) SCREEN_W = 320;
-    if (SCREEN_H < 240) SCREEN_H = 240;
-    printf("Resolution: %dx%d (V-FOV %.1f deg for %d deg H-FOV)\n",
-           SCREEN_W, SCREEN_H, computeVFov(), (int)H_FOV_DEG);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
+
+    /* If fullscreen with no explicit size, fill any unspecified dimension
+       with the desktop resolution. SDL_GetVideoInfo()->current_w/h returns
+       the desktop size BEFORE SDL_SetVideoMode has been called (SDL 1.2.10+). */
+    if (fullscreen) {
+        const SDL_VideoInfo *vi = SDL_GetVideoInfo();
+        if (vi) {
+            if (!wSpecified) SCREEN_W = vi->current_w;
+            if (!hSpecified) SCREEN_H = vi->current_h;
+        }
+    }
+    if (SCREEN_W < 320) SCREEN_W = 320;
+    if (SCREEN_H < 240) SCREEN_H = 240;
+    printf("Resolution: %dx%d%s (V-FOV %.1f deg for %d deg H-FOV)\n",
+           SCREEN_W, SCREEN_H, fullscreen ? " fullscreen" : "",
+           computeVFov(), (int)H_FOV_DEG);
 
     if (!FSOUND_Init(SAMPLE_RATE, 32, 0)) {
         fprintf(stderr, "FMOD init failed\n");
@@ -579,7 +596,9 @@ int main(int argc, char *argv[])
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-    SDL_Surface *screen = SDL_SetVideoMode(SCREEN_W, SCREEN_H, 32, SDL_OPENGL);
+    Uint32 videoFlags = SDL_OPENGL;
+    if (fullscreen) videoFlags |= SDL_FULLSCREEN;
+    SDL_Surface *screen = SDL_SetVideoMode(SCREEN_W, SCREEN_H, 32, videoFlags);
     if (!screen) {
         fprintf(stderr, "SDL_SetVideoMode failed: %s\n", SDL_GetError());
         FSOUND_Close();
@@ -788,28 +807,46 @@ int main(int argc, char *argv[])
         float rightX = cosf(yaw * (float)M_PI / 180.0f);
         float rightZ = -sinf(yaw * (float)M_PI / 180.0f);
 
-        float moveX = 0, moveZ = 0;
-        if (keys[SDLK_w]) { moveX += forwardX; moveZ += forwardZ; }
-        if (keys[SDLK_s]) { moveX -= forwardX; moveZ -= forwardZ; }
-        if (keys[SDLK_a]) { moveX -= rightX;   moveZ -= rightZ; }
-        if (keys[SDLK_d]) { moveX += rightX;   moveZ += rightZ; }
-
-        float moveLen = sqrtf(moveX * moveX + moveZ * moveZ);
-        int isMoving = 0;
-        if (moveLen > 0.001f) {
-            /* Scale by the physics fixed timestep (1/120s), not frame dt.
-               Bullet applies setWalkDirection once per internal substep, and
-               stepSimulation runs floor(frameDt * 120) substeps. So a walk
-               vector of (speed / 120) per substep yields exactly `speed` m/s
-               over any frame rate. Using frame dt here caused the ATI/GeForce
-               machines running at high FPS to crawl. */
-            float perStep = moveSpeed * (1.0f / 120.0f);
-            moveX = (moveX / moveLen) * perStep;
-            moveZ = (moveZ / moveLen) * perStep;
-            isMoving = 1;
+        /* Desired (wish) velocity in m/s from input. */
+        float wishX = 0, wishZ = 0;
+        if (keys[SDLK_w]) { wishX += forwardX; wishZ += forwardZ; }
+        if (keys[SDLK_s]) { wishX -= forwardX; wishZ -= forwardZ; }
+        if (keys[SDLK_a]) { wishX -= rightX;   wishZ -= rightZ; }
+        if (keys[SDLK_d]) { wishX += rightX;   wishZ += rightZ; }
+        float wishLen = sqrtf(wishX * wishX + wishZ * wishZ);
+        if (wishLen > 0.001f) {
+            wishX = (wishX / wishLen) * moveSpeed;
+            wishZ = (wishZ / wishLen) * moveSpeed;
         }
 
-        phys.character->setWalkDirection(btVector3(moveX, 0, moveZ));
+        /* HL1-style acceleration + sliding. Accel brings velocity toward the
+           wish velocity; friction applies when no input. Higher accel = more
+           responsive; higher friction = shorter slide. Numbers roughly match
+           GoldSrc defaults scaled to our 6 m/s max. */
+        static float velX = 0, velZ = 0;
+        const float ACCEL    = 10.0f;   /* m/s²-ish pull toward wish velocity */
+        const float FRICTION = 20.0f;   /* m/s²-ish slowdown when no input    */
+        if (wishLen > 0.001f) {
+            velX += (wishX - velX) * ACCEL * dt;
+            velZ += (wishZ - velZ) * ACCEL * dt;
+        } else {
+            float speed = sqrtf(velX * velX + velZ * velZ);
+            if (speed > 0.001f) {
+                float drop = FRICTION * dt;
+                float newSpeed = speed - drop;
+                if (newSpeed < 0) newSpeed = 0;
+                velX *= newSpeed / speed;
+                velZ *= newSpeed / speed;
+            } else {
+                velX = 0; velZ = 0;
+            }
+        }
+        int isMoving = (velX * velX + velZ * velZ) > 0.04f;  /* > 0.2 m/s */
+
+        /* Convert velocity (m/s) to per-substep displacement for Bullet. */
+        const float perStep = 1.0f / 120.0f;
+        phys.character->setWalkDirection(
+            btVector3(velX * perStep, 0, velZ * perStep));
 
         if (isMoving && phys.character->onGround()) {
             footstepTimer -= (int)(dt * 1000);
@@ -843,6 +880,23 @@ int main(int argc, char *argv[])
         glEnable(GL_LIGHTING);
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
+
+        /* Camera roll on strafe (HL1 v_iroll_angle): the velocity component
+           along the right vector produces a bank angle, clamped to MAX_ROLL.
+           Positive strafe (moving right) tilts head right, which in view
+           space is a CCW rotation around the view's Z axis. The rotation
+           goes BEFORE glLookAt so matrix order is M = R * L (roll applied
+           in view space, lookat transforms world→view first). */
+        {
+            float strafeVel = velX * rightX + velZ * rightZ;
+            const float ROLL_SPEED = 6.0f;    /* vel at which we hit max roll */
+            const float MAX_ROLL   = 2.0f;    /* degrees */
+            float roll = strafeVel / ROLL_SPEED * MAX_ROLL;
+            if (roll >  MAX_ROLL) roll =  MAX_ROLL;
+            if (roll < -MAX_ROLL) roll = -MAX_ROLL;
+            glRotatef(roll, 0.0f, 0.0f, 1.0f);
+        }
+
         glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
 
         /* Light position must be submitted AFTER the view matrix is on the

@@ -5,7 +5,7 @@
 player spawn - 0 1 0 0
 
 # Animated decoration: mrfixit standing in Room 1
-decoration mrfixit_01 props 0 0 -3 0 iqm=models/mrfixit.iqm scale=0.15 flip_cull=1
+decoration mrfixit_01 props -2 0 -1 0 iqm=models/mrfixit.iqm scale=0.225 flip_cull=1
 
 # Workstation in Room 1 (desk with CRT, keyboard, tower PC, and chair)
 # Desk origin is bottom-center; monitor+keyboard sit on desk top (assumed ~0.75m high)

@@ -115,7 +115,10 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     float stepHeight = 0.35f;
     pw->character = new FpsCharacterController(
         pw->ghostObject, pw->capsuleShape, stepHeight);
-    pw->character->setGravity(btVector3(0, -9.81f, 0));
+    /* Heavier-than-Earth gravity so falls feel snappy instead of floaty.
+       Real 9.81 m/s² makes short drops (under ~3 m) feel like moon physics
+       in an FPS context. ~2.5G matches the Quake/HL1 feel roughly. */
+    pw->character->setGravity(btVector3(0, -24.0f, 0));
 
     /* CRITICAL workaround: btKinematicCharacterController's constructor sets
        m_up=(0,0,1) (Z-up) internally, then calls setUp(x=(1,0,0)) from the
@@ -133,7 +136,9 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
         pw->ghostObject->setWorldTransform(xform);
     }
     pw->character->setMaxSlope(btRadians(50.0f));
-    pw->character->setJumpSpeed(5.0f);
+    /* Jump gives max rise = v²/(2g) = 49/48 ≈ 1.02m — plenty for a 0.66m
+       desk, comfortably under a 3m ceiling. */
+    pw->character->setJumpSpeed(7.0f);
 
     pw->world->addCollisionObject(pw->ghostObject,
         btBroadphaseProxy::CharacterFilter,
