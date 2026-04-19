@@ -15,6 +15,7 @@ There are **four** independent build systems, each for a different target. They 
 | Linux (system SDL, FMOD) | `make` | `sdlfun` |
 | Linux (system SDL, OpenAL) | `make USE_OPENAL=1` (needs `libopenal-dev`) | `sdlfun` |
 | Windows 98 / Dev-C++ (FMOD) | `build.bat` (uses `C:\Dev-Cpp\bin\g++.exe`) or open `SDLFun.dev` | `SDLFun.exe` |
+| Windows 98 / Dev-C++ (OpenAL) | `build_openal.bat` — user provides OpenAL headers + MinGW import lib in `vendor/` | `SDLFun.exe` |
 | Windows 10 (portable WinLibs MinGW, FMOD) | `build_win10.bat` | `SDLFun_w10.exe` |
 | Windows 10 (portable MinGW, OpenAL Soft) | `build_win10_openal.bat` — user provides OpenAL Soft headers/lib in `vendor_win10/` | `SDLFun_w10_openal.exe` |
 | CMake | `mkdir build && cd build && cmake .. && make` — add `-DUSE_VENDOR_SDL=ON` / `-DUSE_VENDOR_FMOD=ON` to use vendored libs | `SDLFun` |
