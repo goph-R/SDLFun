@@ -103,6 +103,10 @@ struct Entity {
             /* Cached local-space AABB center (post-scale, pre-rotation) so the
                door's per-tick collider transform can be recomputed cheaply. */
             float lcx, lcy, lcz;
+            /* auto_close: seconds to stay open before auto-closing. 0 = stay
+               open until re-activated (manual toggle, current switch-pair feel). */
+            float autoCloseTime;
+            float openTimer;
         } door;
     };
 };
@@ -315,6 +319,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
                 else e->door.axis = 1; /* Y default */
             }
             else if (strcmp(key, "amount") == 0) e->door.amount = (float)atof(value);
+            else if (strcmp(key, "auto_close") == 0) e->door.autoCloseTime = (float)atof(value);
         }
 
         if (type == ENT_DOOR) {

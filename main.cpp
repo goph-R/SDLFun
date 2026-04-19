@@ -525,6 +525,18 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
     for (int i = 0; i < el->count; i++) {
         Entity *e = &el->entities[i];
         if (!e->active || e->type != ENT_DOOR || !e->physBody) continue;
+
+        /* Auto-close: if door is fully open and auto_close was set, count up.
+           When the timer exceeds the configured duration, transition to
+           closing. Blocked closes don't reset the timer — it's advisory. */
+        if (e->door.state == 2 && e->door.autoCloseTime > 0.0f) {
+            e->door.openTimer += dt;
+            if (e->door.openTimer >= e->door.autoCloseTime) {
+                e->door.state = 3;
+                e->door.openTimer = 0.0f;
+            }
+        }
+
         if (e->door.state != 1 && e->door.state != 3) continue;
 
         float delta = (e->door.speed * dt) / e->door.amount;
@@ -554,7 +566,10 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
         if (physMoveKinematicBox(pw, e->physBody, cx, cy, cz, nr)) {
             e->door.progress = target;
             e->posX = nx; e->posY = ny; e->posZ = nz; e->rotY = nr;
-            if (target >= 1.0f) e->door.state = 2;
+            if (target >= 1.0f) {
+                e->door.state = 2;
+                e->door.openTimer = 0.0f;
+            }
             else if (target <= 0.0f) e->door.state = 0;
         }
         /* else: blocked, keep progress/state unchanged, try again next tick */
