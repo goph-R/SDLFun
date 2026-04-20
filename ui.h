@@ -143,6 +143,15 @@ static const unsigned char ui_font8x8[128][8] = {
 struct UiRect  { float x, y, w, h; };
 struct UiColor { float r, g, b, a; };
 
+/* Alignment flags. Vertical bits 0..1, horizontal bits 2..4. Combine with `|`.
+   Default for uiText is TOP|LEFT (anchor at top-left, matches old behavior). */
+#define UI_ALIGN_TOP     0
+#define UI_ALIGN_MIDDLE  1
+#define UI_ALIGN_BOTTOM  2
+#define UI_ALIGN_LEFT    4
+#define UI_ALIGN_CENTER  8
+#define UI_ALIGN_RIGHT   16
+
 static UiRect uiRectMake(float x, float y, float w, float h) {
     UiRect r; r.x = x; r.y = y; r.w = w; r.h = h; return r;
 }
@@ -256,16 +265,31 @@ static void uiIcon(UiRect r, GLuint tex)
     glDisable(GL_TEXTURE_2D);
 }
 
-/* Bitmap text. scale=1 gives 8x8 px glyphs; scale=2 gives 16x16 px, etc.
-   Color applies to every glyph; alpha modulates by the atlas. */
-static void uiText(UiState *ui, float x, float y, float scale,
-                   UiColor c, const char *text)
+/* Bitmap text.
+   (x, y) is the anchor — by default the top-left corner of the first glyph.
+   Use `align` to move the anchor: e.g. MIDDLE|CENTER anchors the middle of
+   the text at (x, y), RIGHT anchors the right edge, etc.
+   scale=1 → 8x8 px glyphs, scale=2 → 16x16, etc. */
+static void uiText(UiState *ui, float x, float y, UiColor c, const char *text,
+                   float scale = 2.0f,
+                   int align = UI_ALIGN_TOP | UI_ALIGN_LEFT)
 {
+    const float gw = 8.0f * scale;
+    const float gh = 8.0f * scale;
+
+    /* Measure once so alignment can offset the pen start. */
+    int len = 0;
+    for (const char *p = text; *p; p++) len++;
+    float textW = len * gw;
+
+    if (align & UI_ALIGN_CENTER)      x -= textW * 0.5f;
+    else if (align & UI_ALIGN_RIGHT)  x -= textW;
+    if (align & UI_ALIGN_MIDDLE)      y -= gh * 0.5f;
+    else if (align & UI_ALIGN_BOTTOM) y -= gh;
+
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, ui->fontTex);
     glColor4f(c.r, c.g, c.b, c.a);
-    const float gw = 8.0f * scale;
-    const float gh = 8.0f * scale;
     const float tu = 8.0f / (float)UI_ATLAS_W;
     const float tv = 8.0f / (float)UI_ATLAS_H;
     float px = x;
