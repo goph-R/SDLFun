@@ -211,7 +211,12 @@ static void uiShutdown(UiState *ui)
 }
 
 /* Enter 2D/ortho mode. Pixel coords, (0,0) top-left.
-   All UI draws must be between uiBegin/uiEnd. */
+   All UI draws must be between uiBegin/uiEnd.
+
+   Note on culling: our ortho flips Y (top=0, bottom=screenH), so quads
+   authored with natural top-left-to-bottom-left winding come out back-
+   facing in NDC. With GL_CULL_FACE enabled at init, they'd be culled.
+   Disable culling while the UI draws. */
 static void uiBegin(UiState *ui)
 {
     glMatrixMode(GL_PROJECTION);
@@ -223,13 +228,16 @@ static void uiBegin(UiState *ui)
     glLoadIdentity();
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_LIGHTING);
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
 static void uiEnd(UiState * /*ui*/)
 {
     glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
