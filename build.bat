@@ -57,17 +57,30 @@ if exist bd.o (
 )
 
 REM ----------------------------------------------------------------
+REM  Lua 5.1.5 (cached — delete lua.o to force rebuild)
+REM  -DLUA_ANSI disables loadlib dlopen / Win32 branches that Dev-C++ 3.4
+REM  can't satisfy. -Dluaall_c is Lua's own unity-build switch.
+REM ----------------------------------------------------------------
+if exist lua.o (
+    echo Skipping Lua ^(lua.o cached^)
+) else (
+    echo Compiling Lua...
+    C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
+    if errorlevel 1 goto error
+)
+
+REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling main...
-C:\Dev-Cpp\bin\g++.exe -Ivendor\include -Ivendor\bullet3-3.25\src -O2 -c main.cpp -o main.o
+C:\Dev-Cpp\bin\g++.exe -Ivendor\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src -O2 -c main.cpp -o main.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-C:\Dev-Cpp\bin\g++.exe main.o bl.o bc.o bd.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
+C:\Dev-Cpp\bin\g++.exe main.o bl.o bc.o bd.o lua.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
 if errorlevel 1 goto error
 
 echo.

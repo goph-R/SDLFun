@@ -34,7 +34,7 @@ for /f "tokens=*" %%V in ('%GPP% -dumpversion') do set "GCC_VER=%%V"
 echo Found GCC %GCC_VER%
 echo.
 
-set "OPTS=-O2 -Ivendor_win10\include -Ivendor\bullet3-3.25\src"
+set "OPTS=-O2 -Ivendor_win10\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src"
 
 REM ----------------------------------------------------------------
 REM  Compile Bullet Physics (cached — delete bl.o/bc.o/bd.o to force rebuild)
@@ -64,6 +64,17 @@ if exist bd.o (
 )
 
 REM ----------------------------------------------------------------
+REM  Lua 5.1.5 (cached — delete lua.o to force rebuild)
+REM ----------------------------------------------------------------
+if exist lua.o (
+    echo Skipping Lua ^(lua.o cached^)
+) else (
+    echo Compiling Lua...
+    %GCC% -Ivendor\lua-5.1.5\src -Dluaall_c -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
+    if errorlevel 1 goto error
+)
+
+REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling SDL main stub...
@@ -78,7 +89,7 @@ REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-%GPP% main.o sdl_main.o bl.o bc.o bd.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
+%GPP% main.o sdl_main.o bl.o bc.o bd.o lua.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------

@@ -188,6 +188,14 @@ struct UiState {
     int screenH;
     float virtualW;    /* derived: UI_VIRTUAL_H * aspect */
     float virtualH;    /* UI_VIRTUAL_H (1080) */
+
+    /* Transient centered message — shown near the top of the screen, fades
+       out over the last UI_MSG_FADE seconds of its lifetime. msgTimeLeft > 0
+       means a message is active. Driven by uiShowMessage + uiUpdateMessage;
+       rendered by uiDrawMessage (call inside uiBegin/uiEnd). */
+    char  msgText[128];
+    float msgTimeLeft;
+    float msgTotal;
 };
 
 static float uiGetWidth(UiState *ui)  { return ui->virtualW; }
@@ -195,6 +203,7 @@ static float uiGetHeight(UiState *ui) { return ui->virtualH; }
 
 static void uiInit(UiState *ui, int screenW, int screenH)
 {
+    memset(ui, 0, sizeof(*ui));
     ui->screenW = screenW;
     ui->screenH = screenH;
     ui->virtualH = UI_VIRTUAL_H;
@@ -354,6 +363,41 @@ static void uiText(UiState *ui, float x, float y, UiColor c, const char *text,
     }
     glEnd();
     glDisable(GL_TEXTURE_2D);
+}
+
+/* ---- Transient message ----
+   Shown near the top of the screen, fades over the last UI_MSG_FADE
+   seconds. Calling uiShowMessage mid-display overwrites the current
+   message (no queueing in v1). */
+#define UI_MSG_FADE 0.5f
+
+static void uiShowMessage(UiState *ui, const char *text, float seconds)
+{
+    if (seconds <= 0.0f) seconds = 3.0f;
+    strncpy(ui->msgText, text, sizeof(ui->msgText) - 1);
+    ui->msgText[sizeof(ui->msgText) - 1] = '\0';
+    ui->msgTimeLeft = seconds;
+    ui->msgTotal    = seconds;
+}
+
+static void uiUpdateMessage(UiState *ui, float dt)
+{
+    if (ui->msgTimeLeft > 0.0f) {
+        ui->msgTimeLeft -= dt;
+        if (ui->msgTimeLeft < 0.0f) ui->msgTimeLeft = 0.0f;
+    }
+}
+
+static void uiDrawMessage(UiState *ui)
+{
+    if (ui->msgTimeLeft <= 0.0f) return;
+    float alpha = 1.0f;
+    if (ui->msgTimeLeft < UI_MSG_FADE) alpha = ui->msgTimeLeft / UI_MSG_FADE;
+    UiColor c = uiRgba(1, 1, 1, alpha);
+    /* Anchored ~25% from the top; centered horizontally. */
+    float y = -uiGetHeight(ui) * 0.25f;
+    uiText(ui, 0.0f, y, c, ui->msgText,
+           3.5f, UI_ALIGN_TOP | UI_ALIGN_CENTER);
 }
 
 /* Horizontal progress bar: dark background, white border, colored fill.

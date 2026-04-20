@@ -20,6 +20,7 @@
 #include "flashlight.h"
 #include "physics.h"
 #include "ui.h"
+#include "script.h"
 
 #define SAMPLE_RATE 44100
 
@@ -87,54 +88,6 @@ static void initMultitexture(void)
     if (!hasMultitexture) {
         printf("Multitexture: not available (lightmaps disabled)\n");
     }
-}
-
-/* ---- Sound helpers ----
- * Each generator fills a plain short[] with 16-bit signed mono PCM, then
- * hands it to sndMakeBuffer so the backend (FMOD or OpenAL) can upload it.
- */
-
-static SoundBuffer createTone(float freq, int length)
-{
-    short *buf = (short *)malloc(length * sizeof(short));
-    for (int i = 0; i < length; i++) {
-        float t = (float)i / SAMPLE_RATE;
-        float envelope = 1.0f - (float)i / length;
-        buf[i] = (short)(sinf(2.0f * (float)M_PI * freq * t) * 32000.0f * envelope);
-    }
-    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
-    free(buf);
-    return s;
-}
-
-static SoundBuffer createGunshot(void)
-{
-    int length = 4410;
-    short *buf = (short *)malloc(length * sizeof(short));
-    for (int i = 0; i < length; i++) {
-        float envelope = 1.0f - (float)i / length;
-        envelope *= envelope;
-        float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
-        buf[i] = (short)(noise * 28000.0f * envelope);
-    }
-    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
-    free(buf);
-    return s;
-}
-
-static SoundBuffer createFootstep(void)
-{
-    int length = 2205;
-    short *buf = (short *)malloc(length * sizeof(short));
-    for (int i = 0; i < length; i++) {
-        float envelope = 1.0f - (float)i / length;
-        float thud  = sinf(2.0f * (float)M_PI * 80.0f * (float)i / SAMPLE_RATE);
-        float noise = (float)(rand() % 65536 - 32768) / 32768.0f;
-        buf[i] = (short)((thud * 0.7f + noise * 0.3f) * 20000.0f * envelope);
-    }
-    SoundBuffer s = sndMakeBuffer(buf, length, SAMPLE_RATE);
-    free(buf);
-    return s;
 }
 
 /* ---- OpenGL helpers ---- */
@@ -632,9 +585,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    SoundBuffer sndGunshot  = createGunshot();
-    SoundBuffer sndFootstep = createFootstep();
-    SoundBuffer sndJump     = createTone(220.0f, 4410);
+    SoundLibrary sndLib;
+    sndLibInit(&sndLib);
+    sndLibRegister(&sndLib, "fire", sndLoadWav("assets/sounds/fire.wav"));
+    sndLibRegister(&sndLib, "step", sndLoadWav("assets/sounds/step.wav"));
+    sndLibRegister(&sndLib, "jump", sndLoadWav("assets/sounds/jump.wav"));
+    SoundBuffer sndGunshot  = sndLibFind(&sndLib, "fire");
+    SoundBuffer sndFootstep = sndLibFind(&sndLib, "step");
+    SoundBuffer sndJump     = sndLibFind(&sndLib, "jump");
 
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -809,6 +767,19 @@ int main(int argc, char *argv[])
     int flashlightOn = 0;
     int debugColliders = 0;
 
+    float fpsAccum = 0.0f;
+    int   fpsFrames = 0;
+    int   fpsDisplay = 0;
+
+    /* Boot the Lua runtime after every engine system it may reach into
+       (UI, audio, entities) is ready. on_start() fires before the game
+       loop so its effects (HUD messages, door/switch activations) are
+       visible on frame 0. */
+    ScriptSystem script;
+    scriptInit(&script, &ui, &snd, &sndLib, entities);
+    scriptRunFile(&script, "scripts/main.lua");
+    scriptCall(&script, "on_start");
+
     Uint32 lastTime = SDL_GetTicks();
 
     SDL_Event event;
@@ -819,6 +790,16 @@ int main(int argc, char *argv[])
         float dt = (now - lastTime) / 1000.0f;
         if (dt > 0.15f) dt = 0.15f;
         lastTime = now;
+
+        fpsAccum += dt;
+        fpsFrames++;
+        if (fpsAccum >= 0.5f) {
+            fpsDisplay = (int)(fpsFrames / fpsAccum + 0.5f);
+            fpsAccum = 0.0f;
+            fpsFrames = 0;
+        }
+
+        uiUpdateMessage(&ui, dt);
 
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
@@ -1030,6 +1011,14 @@ int main(int argc, char *argv[])
             uiText(&ui, halfW - pad, halfH - pad - 40, amber, ammo,
                    4.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
 
+            /* FPS: top-right */
+            char fps[32];
+            snprintf(fps, sizeof(fps), "%d FPS", fpsDisplay);
+            uiText(&ui, halfW - pad, -halfH + pad, white, fps,
+                   2.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
+
+            /* Transient script-driven message (ui_show_message from Lua). */
+            uiDrawMessage(&ui);
         }
         uiEnd(&ui);
 
@@ -1038,6 +1027,7 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
+    scriptShutdown(&script);
     uiShutdown(&ui);
     if (hasDynLm) dynLmFree(&dynLm);
     for (int i = 0; i < entities->count; i++) {
@@ -1053,9 +1043,7 @@ int main(int argc, char *argv[])
     physCleanup(&phys);
     objFree(&level);
 
-    sndFreeBuffer(sndGunshot);
-    sndFreeBuffer(sndFootstep);
-    sndFreeBuffer(sndJump);
+    sndLibShutdown(&sndLib);
     sndShutdown(&snd);
     SDL_Quit();
     return 0;
