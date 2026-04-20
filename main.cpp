@@ -19,6 +19,7 @@
 #include "entity.h"
 #include "flashlight.h"
 #include "physics.h"
+#include "ui.h"
 
 #define SAMPLE_RATE 44100
 
@@ -670,6 +671,10 @@ int main(int argc, char *argv[])
     /* Init multitexture extension */
     initMultitexture();
 
+    /* Init UI / HUD (builds bitmap font atlas as a GL texture) */
+    UiState ui;
+    uiInit(&ui, SCREEN_W, SCREEN_H);
+
     /* Texture cache (loads textures on demand) */
     TexCache texCache;
     texCacheInit(&texCache);
@@ -989,11 +994,36 @@ int main(int argc, char *argv[])
         renderGun(gunFlashTimer);
         renderCrosshair();
 
+        /* HUD — placeholder values until player/weapon state exists. */
+        uiBegin(&ui);
+        {
+            float pad = 16.0f;
+            float barW = 180.0f, barH = 18.0f;
+            /* Health: bottom-left */
+            uiQuad(pad - 4, SCREEN_H - pad - barH - 20, 80, 14, 0, 0, 0, 0.55f);
+            uiText(&ui, pad, SCREEN_H - pad - barH - 18, 1.25f,
+                   1.0f, 1.0f, 1.0f, "HEALTH");
+            uiBar(pad, SCREEN_H - pad - barH, barW, barH, 0.87f,
+                  0.85f, 0.2f, 0.2f);
+            uiText(&ui, pad + barW + 12, SCREEN_H - pad - barH + 2, 1.5f,
+                   1.0f, 1.0f, 1.0f, "87");
+
+            /* Ammo: bottom-right */
+            char ammo[32];
+            snprintf(ammo, sizeof(ammo), "%d / %d", 24, 72);
+            int ammoLen = (int)strlen(ammo);
+            float ammoW = ammoLen * 8.0f * 2.0f;  /* scale 2.0 */
+            uiText(&ui, SCREEN_W - pad - ammoW, SCREEN_H - pad - 16, 2.0f,
+                   1.0f, 1.0f, 0.2f, ammo);
+        }
+        uiEnd(&ui);
+
         SDL_GL_SwapBuffers();
         SDL_Delay(1);
     }
 
     /* Cleanup */
+    uiShutdown(&ui);
     if (hasDynLm) dynLmFree(&dynLm);
     for (int i = 0; i < entities->count; i++) {
         Entity *e = &entities->entities[i];

@@ -17,7 +17,7 @@ all: $(BIN)
 $(BIN): $(OBJ)
 	$(CPP) $(OBJ) -o $(BIN) $(LIBS)
 
-main.o: main.cpp obj_loader.h physics.h sound.h
+main.o: main.cpp obj_loader.h physics.h sound.h ui.h
 	$(CPP) -c main.cpp -o main.o $(CXXFLAGS)
 
 bullet_linear_math.o: $(BULLET_SRC)/btLinearMathAll.cpp
