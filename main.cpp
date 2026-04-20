@@ -587,12 +587,9 @@ int main(int argc, char *argv[])
 
     SoundLibrary sndLib;
     sndLibInit(&sndLib);
-    sndLibRegister(&sndLib, "fire", sndLoadWav("assets/sounds/fire.wav"));
-    sndLibRegister(&sndLib, "step", sndLoadWav("assets/sounds/step.wav"));
-    sndLibRegister(&sndLib, "jump", sndLoadWav("assets/sounds/jump.wav"));
-    SoundBuffer sndGunshot  = sndLibFind(&sndLib, "fire");
-    SoundBuffer sndFootstep = sndLibFind(&sndLib, "step");
-    SoundBuffer sndJump     = sndLibFind(&sndLib, "jump");
+    /* Sounds are registered from assets.lua once the Lua runtime boots
+       (further down, after UI + entities exist). sndLib is empty until
+       then — nothing tries to play before the main loop. */
 
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -777,6 +774,7 @@ int main(int argc, char *argv[])
        visible on frame 0. */
     ScriptSystem script;
     scriptInit(&script, &ui, &snd, &sndLib, entities);
+    scriptLoadAssets(&script, "assets.lua");
     scriptRunFile(&script, "scripts/main.lua");
     scriptCall(&script, "on_start");
 
@@ -826,14 +824,14 @@ int main(int argc, char *argv[])
                 if (event.key.keysym.sym == SDLK_SPACE) {
                     if (phys.character->onGround()) {
                         phys.character->jump();
-                        sndPlay(&snd, sndJump);
+                        sndPlay(&snd, sndLibFind(&sndLib, "jump"));
                     }
                 }
             }
             if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     gunFlashTimer = 4;
-                    sndPlay(&snd, sndGunshot);
+                    sndPlay(&snd, sndLibFind(&sndLib, "fire"));
                 }
             }
             if (event.type == SDL_MOUSEMOTION) {
@@ -895,7 +893,7 @@ int main(int argc, char *argv[])
         if (isMoving && phys.character->onGround()) {
             footstepTimer -= (int)(dt * 1000);
             if (footstepTimer <= 0) {
-                sndPlay(&snd, sndFootstep);
+                sndPlay(&snd, sndLibFind(&sndLib, "step"));
                 footstepTimer = 400;
             }
         } else {

@@ -172,6 +172,58 @@ static int scriptRunFile(ScriptSystem *s, const char *path)
     return 1;
 }
 
+/* Load the asset manifest (expected to `return` a table shaped like
+   assets.lua). Walks manifest.sounds = { name = path, ... }, loading
+   each WAV into the SoundLibrary. Missing or non-table `sounds` is
+   fine — just means no sounds get registered.
+
+   Safely duplicates keys before lua_tostring per the Lua 5.1 docs:
+   lua_tostring can mutate the value on the stack into a string, and
+   mutating a key breaks the next lua_next. */
+static int scriptLoadAssets(ScriptSystem *s, const char *path)
+{
+    lua_State *L = s->L;
+    lua_pushcfunction(L, scr_traceback);
+    int tbidx = lua_gettop(L);
+
+    if (luaL_loadfile(L, path) != 0) {
+        fprintf(stderr, "script: load %s: %s\n", path, lua_tostring(L, -1));
+        lua_pop(L, 2);
+        return 0;
+    }
+    if (lua_pcall(L, 0, 1, tbidx) != 0) {
+        fprintf(stderr, "script: run %s: %s\n", path, lua_tostring(L, -1));
+        lua_pop(L, 2);
+        return 0;
+    }
+    if (!lua_istable(L, -1)) {
+        fprintf(stderr, "script: %s must return a table\n", path);
+        lua_pop(L, 2);
+        return 0;
+    }
+
+    int loaded = 0;
+    lua_getfield(L, -1, "sounds");
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        while (lua_next(L, -2) != 0) {
+            /* stack: ... manifest, sounds, key, value */
+            lua_pushvalue(L, -2);  /* copy key so lua_tostring can't corrupt it */
+            const char *name = lua_tostring(L, -1);
+            const char *wav  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
+            if (name && wav) {
+                sndLibRegister(s->sndLib, name, sndLoadWav(wav));
+                loaded++;
+            }
+            lua_pop(L, 2);  /* pop key-copy and value, leave original key */
+        }
+    }
+    lua_pop(L, 1);  /* sounds (or non-table) */
+    lua_pop(L, 2);  /* manifest, traceback */
+    printf("assets: %d sound(s) registered from %s\n", loaded, path);
+    return 1;
+}
+
 /* Call a nullary global function if it exists. Missing function is a
    no-op, not an error — scripts are free to define only the hooks they
    care about. */

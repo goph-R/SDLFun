@@ -57,17 +57,16 @@ if exist bd.o (
 )
 
 REM ----------------------------------------------------------------
-REM  Lua 5.1.5 (cached — delete lua.o to force rebuild)
+REM  Lua 5.1.5 — always rebuilt. The mapped drive between Win98 and
+REM  the Linux dev host makes `if exist lua.o` unreliable (stale object
+REM  from the other toolchain gets picked up). Lua is small; recompile
+REM  every build is cheap.
 REM  -DLUA_ANSI disables loadlib dlopen / Win32 branches that Dev-C++ 3.4
 REM  can't satisfy. -Dluaall_c is Lua's own unity-build switch.
 REM ----------------------------------------------------------------
-if exist lua.o (
-    echo Skipping Lua ^(lua.o cached^)
-) else (
-    echo Compiling Lua...
-    C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
-    if errorlevel 1 goto error
-)
+echo Compiling Lua...
+C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
+if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Compile main

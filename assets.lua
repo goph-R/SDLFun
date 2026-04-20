@@ -1,10 +1,8 @@
 -- Asset manifest for SDLFun.
 --
--- Lists the logical name → file path for every game asset. Currently
--- authored only — the engine still hard-codes the sound list in main.cpp.
--- Once the Lua runtime is wired up (see PLAN_LUA.md) the engine will
--- `dofile` this and iterate the tables to build the SoundLibrary and the
--- level registry at startup.
+-- Lists the logical name → file path for every game asset. Loaded at
+-- startup by scriptLoadAssets (script.h), which walks the tables and
+-- populates the engine-side registries.
 --
 -- Name convention: short, lowercase, matching what game code / scripts
 -- will pass to snd_play("...") etc. File paths are relative to the repo
