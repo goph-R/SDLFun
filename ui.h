@@ -136,9 +136,14 @@ static const unsigned char ui_font8x8[128][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
-/* Atlas layout: 16 glyphs across × 8 rows, each 8x8 pixels → 128x64 atlas. */
-#define UI_ATLAS_W 128
-#define UI_ATLAS_H 64
+/* Atlas layout: 16 glyphs across × 8 rows. Each cell is 10x10 pixels with
+   a 1-pixel transparent border and the 8x8 glyph in the middle. The border
+   lets GL_LINEAR sample cleanly at glyph edges — without it, neighboring
+   glyphs bleed into each other when text is drawn at fractional positions. */
+#define UI_ATLAS_W      160  /* 16 cells × 10 px */
+#define UI_ATLAS_H      80   /* 8 cells × 10 px  */
+#define UI_GLYPH_PX     8
+#define UI_CELL_PX      10   /* glyph + 1px border each side */
 
 /* Virtual canvas: UI coordinates are in "virtual pixels" relative to a
    fixed 1080-unit height. Virtual width scales with aspect ratio so
@@ -194,14 +199,15 @@ static void uiInit(UiState *ui, int screenW, int screenH)
     unsigned char *px = (unsigned char *)malloc(UI_ATLAS_W * UI_ATLAS_H * 4);
     memset(px, 0, UI_ATLAS_W * UI_ATLAS_H * 4);
     for (int g = 0; g < 128; g++) {
-        int gx = (g % 16) * 8;
-        int gy = (g / 16) * 8;
-        for (int y = 0; y < 8; y++) {
+        int cellX = (g % 16) * UI_CELL_PX;
+        int cellY = (g / 16) * UI_CELL_PX;
+        for (int y = 0; y < UI_GLYPH_PX; y++) {
             unsigned char row = ui_font8x8[g][y];
-            for (int x = 0; x < 8; x++) {
+            for (int x = 0; x < UI_GLYPH_PX; x++) {
                 int on = (row >> x) & 1;
-                int ax = gx + x;
-                int ay = gy + y;
+                /* +1 offset puts the glyph inside the 1-px border */
+                int ax = cellX + 1 + x;
+                int ay = cellY + 1 + y;
                 int off = (ay * UI_ATLAS_W + ax) * 4;
                 px[off + 0] = 255;
                 px[off + 1] = 255;
@@ -319,17 +325,23 @@ static void uiText(UiState *ui, float x, float y, UiColor c, const char *text,
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, ui->fontTex);
     glColor4f(c.r, c.g, c.b, c.a);
-    const float tu = 8.0f / (float)UI_ATLAS_W;
-    const float tv = 8.0f / (float)UI_ATLAS_H;
+    /* UVs span the inner 8x8 of each 10x10 cell (skipping the 1px border
+       that exists to keep GL_LINEAR from bleeding neighbor glyphs). */
+    const float cellU  = (float)UI_CELL_PX  / (float)UI_ATLAS_W;
+    const float cellV  = (float)UI_CELL_PX  / (float)UI_ATLAS_H;
+    const float insetU = 1.0f               / (float)UI_ATLAS_W;
+    const float insetV = 1.0f               / (float)UI_ATLAS_H;
+    const float glyphU = (float)UI_GLYPH_PX / (float)UI_ATLAS_W;
+    const float glyphV = (float)UI_GLYPH_PX / (float)UI_ATLAS_H;
     float px = x;
     glBegin(GL_QUADS);
     for (const char *p = text; *p; p++) {
         unsigned char ch = (unsigned char)*p;
         if (ch >= 128) ch = '?';
-        float u0 = (ch % 16) * tu;
-        float v0 = (ch / 16) * tv;
-        float u1 = u0 + tu;
-        float v1 = v0 + tv;
+        float u0 = (ch % 16) * cellU + insetU;
+        float v0 = (ch / 16) * cellV + insetV;
+        float u1 = u0 + glyphU;
+        float v1 = v0 + glyphV;
         glTexCoord2f(u0, v0); glVertex2f(px,      y);
         glTexCoord2f(u1, v0); glVertex2f(px + gw, y);
         glTexCoord2f(u1, v1); glVertex2f(px + gw, y + gh);
