@@ -572,8 +572,18 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
                 e->door.openTimer = 0.0f;
             }
             else if (target <= 0.0f) e->door.state = 0;
+        } else {
+            /* Blocked — print once per activation session so the user
+               knows the sweep is rejecting. Usually means the collider
+               AABB intersects world geometry (wall, floor, another
+               decoration). Press B to see the wireframe. */
+            static int lastLoggedEnt = -1;
+            if (lastLoggedEnt != i) {
+                printf("door: '%s' blocked (sweep hit — collider overlapping "
+                       "world geometry?)\n", e->name);
+                lastLoggedEnt = i;
+            }
         }
-        /* else: blocked, keep progress/state unchanged, try again next tick */
     }
 }
 
@@ -1020,11 +1030,6 @@ int main(int argc, char *argv[])
             uiText(&ui, halfW - pad, halfH - pad - 40, amber, ammo,
                    4.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
 
-            /* Flashlight hint — centered on the screen. */
-            if (!flashlightOn) {
-                uiText(&ui, 0, 0, white, "Press F for flashlight",
-                       3.0f, UI_ALIGN_MIDDLE | UI_ALIGN_CENTER);
-            }
         }
         uiEnd(&ui);
 
