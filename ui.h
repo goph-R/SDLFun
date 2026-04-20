@@ -352,22 +352,25 @@ static void uiText(UiState *ui, float x, float y, UiColor c, const char *text,
     glDisable(GL_TEXTURE_2D);
 }
 
-/* Horizontal progress bar: dark background, 1px white border, colored fill.
-   fillPct clamped to [0,1]. */
+/* Horizontal progress bar: dark background, white border, colored fill.
+   Border is 3 virtual px — thick enough to stay readable on low-res
+   displays once the virtual canvas is scaled down. fillPct clamped [0,1]. */
+#define UI_BAR_BORDER 3.0f
 static void uiBar(UiRect r, float fillPct, UiColor fill)
 {
     if (fillPct < 0.0f) fillPct = 0.0f;
     if (fillPct > 1.0f) fillPct = 1.0f;
     UiColor bg     = uiRgba(0, 0, 0, 0.7f);
-    UiColor border = uiRgba(1, 1, 1, 0.5f);
+    UiColor border = uiRgba(1, 1, 1, 0.6f);
+    const float b = UI_BAR_BORDER;
     uiQuad(r, bg);
-    uiQuad(uiRectMake(r.x,           r.y,           r.w, 1),   border);
-    uiQuad(uiRectMake(r.x,           r.y + r.h - 1, r.w, 1),   border);
-    uiQuad(uiRectMake(r.x,           r.y,           1,   r.h), border);
-    uiQuad(uiRectMake(r.x + r.w - 1, r.y,           1,   r.h), border);
+    uiQuad(uiRectMake(r.x,           r.y,           r.w, b),   border);
+    uiQuad(uiRectMake(r.x,           r.y + r.h - b, r.w, b),   border);
+    uiQuad(uiRectMake(r.x,           r.y,           b,   r.h), border);
+    uiQuad(uiRectMake(r.x + r.w - b, r.y,           b,   r.h), border);
     if (fillPct > 0.0f) {
-        uiQuad(uiRectMake(r.x + 2, r.y + 2,
-                          (r.w - 4) * fillPct, r.h - 4), fill);
+        uiQuad(uiRectMake(r.x + b, r.y + b,
+                          (r.w - 2*b) * fillPct, r.h - 2*b), fill);
     }
 }
 
