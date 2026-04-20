@@ -139,9 +139,13 @@ static const unsigned char ui_font8x8[128][8] = {
 /* Atlas layout: 16 glyphs across × 8 rows. Each cell is 10x10 pixels with
    a 1-pixel transparent border and the 8x8 glyph in the middle. The border
    lets GL_LINEAR sample cleanly at glyph edges — without it, neighboring
-   glyphs bleed into each other when text is drawn at fractional positions. */
-#define UI_ATLAS_W      160  /* 16 cells × 10 px */
-#define UI_ATLAS_H      80   /* 8 cells × 10 px  */
+   glyphs bleed into each other when text is drawn at fractional positions.
+   Atlas dimensions are padded to the next power of two (256x128) because
+   Win98 / OpenGL 1.1 drivers don't accept NPOT textures — a non-POT upload
+   there silently produces a white texture, which makes every glyph render
+   as a solid filled rectangle. */
+#define UI_ATLAS_W      256  /* POT; only the first 160 px hold glyphs */
+#define UI_ATLAS_H      128  /* POT; only the first 80 px hold glyphs  */
 #define UI_GLYPH_PX     8
 #define UI_CELL_PX      10   /* glyph + 1px border each side */
 
