@@ -140,6 +140,19 @@ static const unsigned char ui_font8x8[128][8] = {
 #define UI_ATLAS_W 128
 #define UI_ATLAS_H 64
 
+struct UiRect  { float x, y, w, h; };
+struct UiColor { float r, g, b, a; };
+
+static UiRect uiRectMake(float x, float y, float w, float h) {
+    UiRect r; r.x = x; r.y = y; r.w = w; r.h = h; return r;
+}
+static UiColor uiRgb(float r, float g, float b) {
+    UiColor c; c.r = r; c.g = g; c.b = b; c.a = 1.0f; return c;
+}
+static UiColor uiRgba(float r, float g, float b, float a) {
+    UiColor c; c.r = r; c.g = g; c.b = b; c.a = a; return c;
+}
+
 struct UiState {
     GLuint fontTex;
     int screenW;
@@ -216,30 +229,29 @@ static void uiEnd(UiState * /*ui*/)
 }
 
 /* Filled, flat-colored rectangle. */
-static void uiQuad(float x, float y, float w, float h,
-                   float r, float g, float b, float a)
+static void uiQuad(UiRect r, UiColor c)
 {
     glDisable(GL_TEXTURE_2D);
-    glColor4f(r, g, b, a);
+    glColor4f(c.r, c.g, c.b, c.a);
     glBegin(GL_QUADS);
-        glVertex2f(x,     y);
-        glVertex2f(x + w, y);
-        glVertex2f(x + w, y + h);
-        glVertex2f(x,     y + h);
+        glVertex2f(r.x,       r.y);
+        glVertex2f(r.x + r.w, r.y);
+        glVertex2f(r.x + r.w, r.y + r.h);
+        glVertex2f(r.x,       r.y + r.h);
     glEnd();
 }
 
 /* Textured rectangle (e.g., weapon icon, key pickup). */
-static void uiIcon(float x, float y, float w, float h, GLuint tex)
+static void uiIcon(UiRect r, GLuint tex)
 {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex);
     glColor4f(1, 1, 1, 1);
     glBegin(GL_QUADS);
-        glTexCoord2f(0, 0); glVertex2f(x,     y);
-        glTexCoord2f(1, 0); glVertex2f(x + w, y);
-        glTexCoord2f(1, 1); glVertex2f(x + w, y + h);
-        glTexCoord2f(0, 1); glVertex2f(x,     y + h);
+        glTexCoord2f(0, 0); glVertex2f(r.x,       r.y);
+        glTexCoord2f(1, 0); glVertex2f(r.x + r.w, r.y);
+        glTexCoord2f(1, 1); glVertex2f(r.x + r.w, r.y + r.h);
+        glTexCoord2f(0, 1); glVertex2f(r.x,       r.y + r.h);
     glEnd();
     glDisable(GL_TEXTURE_2D);
 }
@@ -247,11 +259,11 @@ static void uiIcon(float x, float y, float w, float h, GLuint tex)
 /* Bitmap text. scale=1 gives 8x8 px glyphs; scale=2 gives 16x16 px, etc.
    Color applies to every glyph; alpha modulates by the atlas. */
 static void uiText(UiState *ui, float x, float y, float scale,
-                   float r, float g, float b, const char *text)
+                   UiColor c, const char *text)
 {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, ui->fontTex);
-    glColor3f(r, g, b);
+    glColor4f(c.r, c.g, c.b, c.a);
     const float gw = 8.0f * scale;
     const float gh = 8.0f * scale;
     const float tu = 8.0f / (float)UI_ATLAS_W;
@@ -259,10 +271,10 @@ static void uiText(UiState *ui, float x, float y, float scale,
     float px = x;
     glBegin(GL_QUADS);
     for (const char *p = text; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (c >= 128) c = '?';
-        float u0 = (c % 16) * tu;
-        float v0 = (c / 16) * tv;
+        unsigned char ch = (unsigned char)*p;
+        if (ch >= 128) ch = '?';
+        float u0 = (ch % 16) * tu;
+        float v0 = (ch / 16) * tv;
         float u1 = u0 + tu;
         float v1 = v0 + tv;
         glTexCoord2f(u0, v0); glVertex2f(px,      y);
@@ -277,18 +289,20 @@ static void uiText(UiState *ui, float x, float y, float scale,
 
 /* Horizontal progress bar: dark background, 1px white border, colored fill.
    fillPct clamped to [0,1]. */
-static void uiBar(float x, float y, float w, float h, float fillPct,
-                  float fr, float fg, float fb)
+static void uiBar(UiRect r, float fillPct, UiColor fill)
 {
     if (fillPct < 0.0f) fillPct = 0.0f;
     if (fillPct > 1.0f) fillPct = 1.0f;
-    uiQuad(x, y, w, h, 0, 0, 0, 0.7f);
-    uiQuad(x,         y,         w, 1, 1, 1, 1, 0.5f);
-    uiQuad(x,         y + h - 1, w, 1, 1, 1, 1, 0.5f);
-    uiQuad(x,         y,         1, h, 1, 1, 1, 1, 0.5f);
-    uiQuad(x + w - 1, y,         1, h, 1, 1, 1, 1, 0.5f);
+    UiColor bg     = uiRgba(0, 0, 0, 0.7f);
+    UiColor border = uiRgba(1, 1, 1, 0.5f);
+    uiQuad(r, bg);
+    uiQuad(uiRectMake(r.x,           r.y,           r.w, 1),   border);
+    uiQuad(uiRectMake(r.x,           r.y + r.h - 1, r.w, 1),   border);
+    uiQuad(uiRectMake(r.x,           r.y,           1,   r.h), border);
+    uiQuad(uiRectMake(r.x + r.w - 1, r.y,           1,   r.h), border);
     if (fillPct > 0.0f) {
-        uiQuad(x + 2, y + 2, (w - 4) * fillPct, h - 4, fr, fg, fb, 1.0f);
+        uiQuad(uiRectMake(r.x + 2, r.y + 2,
+                          (r.w - 4) * fillPct, r.h - 4), fill);
     }
 }
 

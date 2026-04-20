@@ -997,24 +997,28 @@ int main(int argc, char *argv[])
         /* HUD — placeholder values until player/weapon state exists. */
         uiBegin(&ui);
         {
-            float pad = 16.0f;
-            float barW = 180.0f, barH = 18.0f;
+            const float pad = 16.0f;
+            const float barW = 180.0f, barH = 18.0f;
+            UiColor white = uiRgb(1, 1, 1);
+            UiColor red   = uiRgb(0.85f, 0.2f, 0.2f);
+            UiColor amber = uiRgb(1.0f, 1.0f, 0.2f);
+
             /* Health: bottom-left */
-            uiQuad(pad - 4, SCREEN_H - pad - barH - 20, 80, 14, 0, 0, 0, 0.55f);
+            uiQuad(uiRectMake(pad - 4, SCREEN_H - pad - barH - 20, 80, 14),
+                   uiRgba(0, 0, 0, 0.55f));
             uiText(&ui, pad, SCREEN_H - pad - barH - 18, 1.25f,
-                   1.0f, 1.0f, 1.0f, "HEALTH");
-            uiBar(pad, SCREEN_H - pad - barH, barW, barH, 0.87f,
-                  0.85f, 0.2f, 0.2f);
+                   white, "HEALTH");
+            uiBar(uiRectMake(pad, SCREEN_H - pad - barH, barW, barH),
+                  0.87f, red);
             uiText(&ui, pad + barW + 12, SCREEN_H - pad - barH + 2, 1.5f,
-                   1.0f, 1.0f, 1.0f, "87");
+                   white, "87");
 
             /* Ammo: bottom-right */
             char ammo[32];
             snprintf(ammo, sizeof(ammo), "%d / %d", 24, 72);
-            int ammoLen = (int)strlen(ammo);
-            float ammoW = ammoLen * 8.0f * 2.0f;  /* scale 2.0 */
+            float ammoW = (float)strlen(ammo) * 8.0f * 2.0f;  /* scale 2 */
             uiText(&ui, SCREEN_W - pad - ammoW, SCREEN_H - pad - 16, 2.0f,
-                   1.0f, 1.0f, 0.2f, ammo);
+                   amber, ammo);
         }
         uiEnd(&ui);
 
