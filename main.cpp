@@ -994,34 +994,36 @@ int main(int argc, char *argv[])
         renderGun(gunFlashTimer);
         renderCrosshair();
 
-        /* HUD — placeholder values until player/weapon state exists. */
+        /* HUD — placeholder values until player/weapon state exists.
+           Coordinates are virtual (1080-tall canvas, origin at center). */
         uiBegin(&ui);
         {
-            const float pad = 16.0f;
-            const float barW = 180.0f, barH = 18.0f;
+            const float pad = 30.0f;
+            const float barW = 400.0f, barH = 40.0f;
+            const float halfW = uiGetWidth(&ui)  * 0.5f;
+            const float halfH = uiGetHeight(&ui) * 0.5f;
             UiColor white = uiRgb(1, 1, 1);
             UiColor red   = uiRgb(0.85f, 0.2f, 0.2f);
             UiColor amber = uiRgb(1.0f, 1.0f, 0.2f);
 
             /* Health: bottom-left */
-            uiQuad(uiRectMake(pad - 4, SCREEN_H - pad - barH - 20, 80, 14),
-                   uiRgba(0, 0, 0, 0.55f));
-            uiText(&ui, pad, SCREEN_H - pad - barH - 18, white, "HEALTH", 1.25f);
-            uiBar(uiRectMake(pad, SCREEN_H - pad - barH, barW, barH),
+            uiText(&ui, -halfW + pad, halfH - pad - barH - 34,
+                   white, "HEALTH", 2.5f);
+            uiBar(uiRectMake(-halfW + pad, halfH - pad - barH, barW, barH),
                   0.87f, red);
-            uiText(&ui, pad + barW + 12, SCREEN_H - pad - barH + 2, white, "87", 1.5f);
+            uiText(&ui, -halfW + pad + barW + 20, halfH - pad - barH + 4,
+                   white, "87", 3.5f);
 
-            /* Ammo: bottom-right (right-aligned, scale defaults to 2.0) */
+            /* Ammo: bottom-right */
             char ammo[32];
             snprintf(ammo, sizeof(ammo), "%d / %d", 24, 72);
-            uiText(&ui, SCREEN_W - pad, SCREEN_H - pad - 16, amber, ammo,
-                   2.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
+            uiText(&ui, halfW - pad, halfH - pad - 40, amber, ammo,
+                   4.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
 
-            /* Flashlight hint — centered, only while flashlight is off. */
+            /* Flashlight hint — centered on the screen. */
             if (!flashlightOn) {
-                uiText(&ui, SCREEN_W * 0.5f, SCREEN_H * 0.5f,
-                       white, "Press F for flashlight",
-                       2.0f, UI_ALIGN_MIDDLE | UI_ALIGN_CENTER);
+                uiText(&ui, 0, 0, white, "Press F for flashlight",
+                       3.0f, UI_ALIGN_MIDDLE | UI_ALIGN_CENTER);
             }
         }
         uiEnd(&ui);

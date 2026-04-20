@@ -140,6 +140,17 @@ static const unsigned char ui_font8x8[128][8] = {
 #define UI_ATLAS_W 128
 #define UI_ATLAS_H 64
 
+/* Virtual canvas: UI coordinates are in "virtual pixels" relative to a
+   fixed 1080-unit height. Virtual width scales with aspect ratio so
+   wider screens show more horizontal space, not stretched text. The
+   origin (0, 0) is at screen CENTER; Y grows down (screen convention).
+     top edge    y = -uiGetHeight() / 2
+     bottom edge y = +uiGetHeight() / 2
+     left edge   x = -uiGetWidth()  / 2
+     right edge  x = +uiGetWidth()  / 2
+*/
+#define UI_VIRTUAL_H 1080.0f
+
 struct UiRect  { float x, y, w, h; };
 struct UiColor { float r, g, b, a; };
 
@@ -164,14 +175,21 @@ static UiColor uiRgba(float r, float g, float b, float a) {
 
 struct UiState {
     GLuint fontTex;
-    int screenW;
+    int screenW;       /* real pixel size (for aspect only) */
     int screenH;
+    float virtualW;    /* derived: UI_VIRTUAL_H * aspect */
+    float virtualH;    /* UI_VIRTUAL_H (1080) */
 };
+
+static float uiGetWidth(UiState *ui)  { return ui->virtualW; }
+static float uiGetHeight(UiState *ui) { return ui->virtualH; }
 
 static void uiInit(UiState *ui, int screenW, int screenH)
 {
     ui->screenW = screenW;
     ui->screenH = screenH;
+    ui->virtualH = UI_VIRTUAL_H;
+    ui->virtualW = UI_VIRTUAL_H * (float)screenW / (float)screenH;
 
     unsigned char *px = (unsigned char *)malloc(UI_ATLAS_W * UI_ATLAS_H * 4);
     memset(px, 0, UI_ATLAS_W * UI_ATLAS_H * 4);
@@ -222,7 +240,10 @@ static void uiBegin(UiState *ui)
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
-    glOrtho(0, ui->screenW, ui->screenH, 0, -1, 1);
+    /* Virtual canvas: center origin, Y-down. */
+    float halfW = ui->virtualW * 0.5f;
+    float halfH = ui->virtualH * 0.5f;
+    glOrtho(-halfW, +halfW, +halfH, -halfH, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
     glLoadIdentity();
@@ -279,7 +300,7 @@ static void uiIcon(UiRect r, GLuint tex)
    the text at (x, y), RIGHT anchors the right edge, etc.
    scale=1 → 8x8 px glyphs, scale=2 → 16x16, etc. */
 static void uiText(UiState *ui, float x, float y, UiColor c, const char *text,
-                   float scale = 2.0f,
+                   float scale = 3.0f,
                    int align = UI_ALIGN_TOP | UI_ALIGN_LEFT)
 {
     const float gw = 8.0f * scale;
