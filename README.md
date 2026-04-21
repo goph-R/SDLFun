@@ -33,9 +33,9 @@ The engine source code (everything under the repo except `vendor/`, `vendor_win1
 ### Assets
 
 All art, level, and texture assets in this repository are **© Dynart**, all rights reserved. This includes, but is not limited to:
-- `test_level.obj` and its bakes (`diffuse.bmp`, `lightmap.bmp`)
-- Everything under `models/` except the exceptions below
+- `assets/levels/test_level.obj` and its bakes (`diffuse.bmp`, `lightmap.bmp`)
+- Everything under `assets/models/` and `assets/textures/` except the exceptions below
 - Everything under `raw/` (Blender sources, GIMP sources, reference photos)
 
 The following assets are **not** original and are bundled under their own terms:
-- `models/mrfixit.iqm`, `models/Head.tga`, `models/Body.tga` — from Lee Salzman's IQM sample pack. See the original IQM distribution for licensing.
+- `assets/models/mrfixit.iqm`, `assets/textures/Head.tga`, `assets/textures/Body.tga` — from Lee Salzman's IQM sample pack. See the original IQM distribution for licensing.

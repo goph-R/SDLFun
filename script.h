@@ -26,12 +26,15 @@ extern "C" {
 #include "lualib.h"
 }
 
+#include "asset_registry.h"
+
 struct ScriptSystem {
-    lua_State    *L;
-    UiState      *ui;
-    SoundSystem  *snd;
-    SoundLibrary *sndLib;
-    EntityList   *entities;
+    lua_State     *L;
+    UiState       *ui;
+    SoundSystem   *snd;
+    SoundLibrary  *sndLib;
+    EntityList    *entities;
+    AssetRegistry *assets;
 };
 
 /* ---- C bindings ---- */
@@ -117,12 +120,13 @@ static int scr_traceback(lua_State *L)
 /* ---- Lifecycle ---- */
 
 static int scriptInit(ScriptSystem *s, UiState *ui, SoundSystem *snd,
-                      SoundLibrary *sndLib, EntityList *el)
+                      SoundLibrary *sndLib, EntityList *el, AssetRegistry *reg)
 {
     s->ui       = ui;
     s->snd      = snd;
     s->sndLib   = sndLib;
     s->entities = el;
+    s->assets   = reg;
 
     s->L = luaL_newstate();
     if (!s->L) {
@@ -172,14 +176,45 @@ static int scriptRunFile(ScriptSystem *s, const char *path)
     return 1;
 }
 
-/* Load the asset manifest (expected to `return` a table shaped like
-   assets.lua). Walks manifest.sounds = { name = path, ... }, loading
-   each WAV into the SoundLibrary. Missing or non-table `sounds` is
-   fine — just means no sounds get registered.
-
+/* Walk a name=path subtable at stack top and dispatch each pair to
+   `onPair`. Used by scriptLoadAssets for sounds / models / textures.
    Safely duplicates keys before lua_tostring per the Lua 5.1 docs:
    lua_tostring can mutate the value on the stack into a string, and
    mutating a key breaks the next lua_next. */
+static int scr_walkStringTable(lua_State *L, ScriptSystem *s,
+                               void (*onPair)(ScriptSystem *, const char *, const char *))
+{
+    if (!lua_istable(L, -1)) return 0;
+    int count = 0;
+    lua_pushnil(L);
+    while (lua_next(L, -2) != 0) {
+        /* stack: ... table, key, value */
+        lua_pushvalue(L, -2);  /* copy key so lua_tostring can't corrupt it */
+        const char *name = lua_tostring(L, -1);
+        const char *val  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
+        if (name && val) { onPair(s, name, val); count++; }
+        lua_pop(L, 2);  /* key-copy and value */
+    }
+    return count;
+}
+
+static void scr_onSound(ScriptSystem *s, const char *name, const char *path)
+{
+    sndLibRegister(s->sndLib, name, sndLoadWav(path));
+}
+static void scr_onModel(ScriptSystem *s, const char *name, const char *path)
+{
+    assetRegAddModel(s->assets, name, path);
+}
+static void scr_onTexture(ScriptSystem *s, const char *name, const char *path)
+{
+    assetRegAddTexture(s->assets, name, path);
+}
+
+/* Load the asset manifest (expected to `return` a table shaped like
+   assets.lua). Walks manifest.sounds / manifest.models / manifest.textures
+   as { name = path, ... } maps, registering each into the sound library
+   or the AssetRegistry. Missing tables are fine — nothing gets registered. */
 static int scriptLoadAssets(ScriptSystem *s, const char *path)
 {
     lua_State *L = s->L;
@@ -202,25 +237,21 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
         return 0;
     }
 
-    int loaded = 0;
     lua_getfield(L, -1, "sounds");
-    if (lua_istable(L, -1)) {
-        lua_pushnil(L);
-        while (lua_next(L, -2) != 0) {
-            /* stack: ... manifest, sounds, key, value */
-            lua_pushvalue(L, -2);  /* copy key so lua_tostring can't corrupt it */
-            const char *name = lua_tostring(L, -1);
-            const char *wav  = lua_isstring(L, -2) ? lua_tostring(L, -2) : NULL;
-            if (name && wav) {
-                sndLibRegister(s->sndLib, name, sndLoadWav(wav));
-                loaded++;
-            }
-            lua_pop(L, 2);  /* pop key-copy and value, leave original key */
-        }
-    }
-    lua_pop(L, 1);  /* sounds (or non-table) */
+    int sounds = scr_walkStringTable(L, s, scr_onSound);
+    lua_pop(L, 1);
+
+    lua_getfield(L, -1, "models");
+    int models = scr_walkStringTable(L, s, scr_onModel);
+    lua_pop(L, 1);
+
+    lua_getfield(L, -1, "textures");
+    int textures = scr_walkStringTable(L, s, scr_onTexture);
+    lua_pop(L, 1);
+
     lua_pop(L, 2);  /* manifest, traceback */
-    printf("assets: %d sound(s) registered from %s\n", loaded, path);
+    printf("assets: %d sound(s), %d model(s), %d texture(s) registered from %s\n",
+           sounds, models, textures, path);
     return 1;
 }
 

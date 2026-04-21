@@ -16,9 +16,11 @@
 #include "obj_loader.h"
 #include "texture.h"
 #include "iqm.h"
+#include "asset_registry.h"
 #include "entity.h"
 #include "flashlight.h"
 #include "physics.h"
+#include "nav.h"
 #include "ui.h"
 #include "script.h"
 
@@ -261,8 +263,8 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
 {
     /* Backward compat: no sectors -> use legacy single-texture path */
     if (mesh->numSectors == 0) {
-        GLuint diffTex = texCacheGet(cache, "diffuse.bmp", GL_CLAMP_TO_EDGE);
-        GLuint lmTex  = texCacheGet(cache, "lightmap.bmp", GL_CLAMP_TO_EDGE);
+        GLuint diffTex = texCacheGet(cache, "assets/levels/diffuse.bmp", GL_CLAMP_TO_EDGE);
+        GLuint lmTex  = texCacheGet(cache, "assets/levels/lightmap.bmp", GL_CLAMP_TO_EDGE);
         renderLevel(mesh, diffTex, lmTex);
         return;
     }
@@ -647,8 +649,8 @@ int main(int argc, char *argv[])
     /* Load level */
     ObjMesh level;
     objInit(&level);
-    if (!objLoad(&level, "test_level.obj")) {
-        fprintf(stderr, "Failed to load test_level.obj\n");
+    if (!objLoad(&level, "assets/levels/test_level.obj")) {
+        fprintf(stderr, "Failed to load assets/levels/test_level.obj\n");
         sndShutdown(&snd);
         SDL_Quit();
         return 1;
@@ -656,11 +658,24 @@ int main(int argc, char *argv[])
     printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
            level.numVerts, level.numTexcoords, level.numTris, level.numMaterials);
 
-    /* Load entities (before physics, to get player spawn position)
-       Heap-allocated: EntityList is ~4MB (256 entities with inline ObjMesh+IqmModel) */
+    /* Heap-allocate the entity list (EntityList is ~4MB — 256 entities
+       with inline ObjMesh+IqmModel) before booting Lua, so the script
+       runtime can hold a borrowed pointer. */
     EntityList *entities = (EntityList *)malloc(sizeof(EntityList));
     entListInit(entities);
-    entLoadFile(entities, "test_level.ent", &texCache);
+
+    /* Boot the Lua runtime and load the asset manifest BEFORE entity load,
+       so .ent files can reference models/textures by their registered
+       logical names (resolved via AssetRegistry). on_start() still fires
+       below, after the game systems that its hooks expect are ready. */
+    AssetRegistry assetReg;
+    assetRegInit(&assetReg);
+    ScriptSystem script;
+    scriptInit(&script, &ui, &snd, &sndLib, entities, &assetReg);
+    scriptLoadAssets(&script, "assets.lua");
+
+    /* Load entities (before physics, to get player spawn position) */
+    entLoadFile(entities, "assets/levels/test_level.ent", &texCache, &assetReg);
 
     float spawnX = 0.0f, spawnY = 2.0f, spawnZ = 0.0f;
     if (entities->playerIndex >= 0) {
@@ -748,11 +763,16 @@ int main(int argc, char *argv[])
     DynLightmap dynLm;
     int hasDynLm = 0;
     {
-        GLuint lmTex = texCacheGet(&texCache, "lightmap.bmp", GL_CLAMP_TO_EDGE);
+        GLuint lmTex = texCacheGet(&texCache, "assets/levels/lightmap.bmp", GL_CLAMP_TO_EDGE);
         if (lmTex) {
-            hasDynLm = dynLmInit(&dynLm, "lightmap.bmp", &level, lmTex);
+            hasDynLm = dynLmInit(&dynLm, "assets/levels/lightmap.bmp", &level, lmTex);
         }
     }
+
+    /* Nav graph — pairs up waypoint entities with pairwise LOS. Empty
+       graph if no waypoints placed; that's fine. */
+    NavGraph nav;
+    navInit(&nav, entities, &phys);
 
     /* Camera state */
     float yaw = 0.0f;
@@ -763,18 +783,16 @@ int main(int argc, char *argv[])
     int footstepTimer = 0;
     int flashlightOn = 0;
     int debugColliders = 0;
+    int debugNav = 0;
 
     float fpsAccum = 0.0f;
     int   fpsFrames = 0;
     int   fpsDisplay = 0;
 
-    /* Boot the Lua runtime after every engine system it may reach into
-       (UI, audio, entities) is ready. on_start() fires before the game
-       loop so its effects (HUD messages, door/switch activations) are
-       visible on frame 0. */
-    ScriptSystem script;
-    scriptInit(&script, &ui, &snd, &sndLib, entities);
-    scriptLoadAssets(&script, "assets.lua");
+    /* Game scripts run once all engine systems (UI, audio, entities,
+       physics) are ready. on_start() fires before the game loop so its
+       effects (HUD messages, door/switch activations) are visible on
+       frame 0. */
     scriptRunFile(&script, "scripts/main.lua");
     scriptCall(&script, "on_start");
 
@@ -814,6 +832,27 @@ int main(int argc, char *argv[])
                 if (event.key.keysym.sym == SDLK_b) {
                     debugColliders = !debugColliders;
                     printf("Collider wireframes: %s\n", debugColliders ? "ON" : "OFF");
+                }
+                if (event.key.keysym.sym == SDLK_n) {
+                    debugNav = !debugNav;
+                    printf("Nav graph: %s (%d node%s)\n",
+                           debugNav ? "ON" : "OFF",
+                           nav.numNodes, nav.numNodes == 1 ? "" : "s");
+                    /* One-shot A* test from player to the last waypoint so the
+                       pathfinder has been exercised before any AI uses it. */
+                    if (debugNav && nav.numNodes >= 2) {
+                        float px, py, pz;
+                        physGetPlayerPos(&phys, &px, &py, &pz);
+                        Vec3 from; from.x = px; from.y = py; from.z = pz;
+                        Vec3 to = nav.nodes[nav.numNodes - 1];
+                        int path[NAV_MAX_NODES];
+                        int len = navFindPath(&nav, &phys, from, to,
+                                              path, NAV_MAX_NODES);
+                        printf("nav: test path (player -> node %d): %d step(s)",
+                               nav.numNodes - 1, len);
+                        for (int i = 0; i < len; i++) printf(" %d", path[i]);
+                        printf("\n");
+                    }
                 }
                 if (event.key.keysym.sym == SDLK_p) {
                     float _px, _py, _pz;
@@ -979,6 +1018,7 @@ int main(int argc, char *argv[])
         entRender(entities);
 
         if (debugColliders) physDebugDrawColliders(&phys);
+        if (debugNav) navDebugRender(&nav);
 
         renderGun(gunFlashTimer);
         renderCrosshair();

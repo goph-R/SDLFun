@@ -19,15 +19,15 @@ There are **four** independent build systems, each for a different target. They 
 
 Audio is OpenAL 1.1 / OpenAL Soft via the header-only wrapper in `sound.h`. The repo vendors `OpenAL32.dll` (1.25.1, used on Win10) and `OpenAL32-win98.dll` (1.9.563, the only release tested working on Win98 — rename to `OpenAL32.dll` before running on a Win98 target). Migration history in `docs/plan-openal.md`.
 
-Bullet is compiled from the three unity-build files `vendor/bullet3-3.25/src/btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`. These produce `bl.o`, `bc.o`, `bd.o` (batch scripts) or `bullet_linear_math.o` etc. (Makefile). Together they take ~60–90s to compile on a modern machine and ~only change when you bump the Bullet version.
+Bullet is compiled from the three unity-build files `vendor/bullet3-3.25/src/btLinearMathAll.cpp`, `btBulletCollisionAll.cpp`, `btBulletDynamicsAll.cpp`. These produce `raw/obj/bl.o`, `bc.o`, `bd.o` (batch scripts) or `bullet_linear_math.o` etc. (Makefile, still in repo root). Together they take ~60–90s to compile on a modern machine and ~only change when you bump the Bullet version.
 
-**Caching**: the Linux Makefile tracks `.cpp` → `.o` dependencies normally. The Windows batch scripts (`build.bat`, `build_win10.bat`) skip the Bullet compile if the `.o` files already exist (`if exist bl.o ...`). They do **not** track Bullet header changes, so if you edit a Bullet header or switch compilers/toolchains, delete `bl.o bc.o bd.o` from the repo root to force a rebuild.
+**Caching**: the Linux Makefile tracks `.cpp` → `.o` dependencies normally. The Windows batch scripts (`build.bat`, `build_win10.bat`) write all `.o` output to `raw/obj/` (gitignored) and skip the Bullet compile if the cached files exist (`if exist raw\obj\bl.o ...`). They do **not** track Bullet header changes, so if you edit a Bullet header or switch compilers/toolchains, delete `raw\obj\bl.o bc.o bd.o` to force a rebuild.
 
 There are no tests and no lint step.
 
 ## Running
 
-Run the built executable from the repo root — it reads `test_level.obj`, `test_level.ent`, `diffuse.bmp`, `lightmap.bmp`, and files under `models/` as **relative paths**. `cd build && ./SDLFun` will fail to find assets.
+Run the built executable from the repo root — it reads everything under `assets/` (levels, models, textures, sounds) as **relative paths**. `cd build && ./SDLFun` will fail to find assets.
 
 Controls: WASD move, mouse look, Space jump, F flashlight, Left-click fire, Esc quit. The window grabs the mouse on startup.
 
@@ -40,7 +40,7 @@ The whole engine is `main.cpp` plus header-only modules with `static` functions.
 - `obj_loader.h` — OBJ/MTL parser. Parses custom `# lm_map`, `# tile_scale`, `# tile_offset` comments from MTL. `ObjMesh` holds verts/normals/texcoords/tris plus up to 32 materials and 32 **sectors**. `objBuildSectors()` sorts triangles by material to produce one draw batch per material.
 - `texture.h` — 24/32-bit BMP and TGA loader, plus a `TexCache` keyed by filename so the same texture isn't uploaded twice. Wrap mode is a parameter — diffuse tiling textures use `GL_REPEAT`, lightmaps use `GL_CLAMP_TO_EDGE`.
 - `iqm.h` — Inter-Quake Model loader with skeletal animation (bone matrix palette computed per frame, software-skinned on CPU because the target is fixed-function GL).
-- `entity.h` — flat array of `Entity` structs (tagged union by `EntityType`). `EntityList` is ~4MB (256 entities each with inline `ObjMesh` + `IqmModel`) and is heap-allocated from `main()` to avoid a stack blowup. `entLoadFile()` parses `test_level.ent`.
+- `entity.h` — flat array of `Entity` structs (tagged union by `EntityType`). `EntityList` is ~4MB (256 entities each with inline `ObjMesh` + `IqmModel`) and is heap-allocated from `main()` to avoid a stack blowup. `entLoadFile()` parses `assets/levels/test_level.ent`.
 - `physics.h` — Bullet world wrapper: static `btBvhTriangleMeshShape` for the level, `btKinematicCharacterController` for the player. `physStep()` includes an explicit ceiling-penetration raycast correction each frame — do not remove it; the character controller doesn't clamp correctly against tight ceilings on its own.
 - `flashlight.h` — CPU-side dynamic lightmap (Half-Life 1 / GoldSrc style). At load time it rasterizes level triangles into UV space to build a `worldPosMap[y][x] → worldXYZ` table. Each frame the flashlight raycasts to a hit point, modifies a region of the lightmap's RGB pixels in RAM, and re-uploads via `glTexSubImage2D`. This is intentional: it gives per-texel flashlight resolution on fixed-function hardware where per-pixel shaders don't exist. See the top-of-file block comment for the full algorithm. **Island margin**: use **0.04** in Blender's Smart UV Project when unwrapping for the lightmap — tighter margins produce visible spill artifacts when the flashlight writes near triangle UV boundaries.
 - `ui.h` — 2D/HUD primitives. Builds an 8x8 ASCII bitmap font atlas in-memory at `uiInit()` (from embedded public-domain font8x8 data — no disk asset). Draws on a **virtual canvas**: 1080 units tall, width scales with aspect ratio, origin at screen center with Y growing down. `uiGetWidth()` / `uiGetHeight()` return the virtual dimensions for positioning against edges. `uiBegin`/`uiEnd` switch to ortho virtual-space, `uiText` / `uiQuad` / `uiBar` / `uiIcon` draw into it. `uiText` supports `UI_ALIGN_*` flags (TOP/MIDDLE/BOTTOM bit-OR LEFT/CENTER/RIGHT) for anchoring. Used for the HUD; menu system will sit on the same primitives.
@@ -49,17 +49,17 @@ The whole engine is `main.cpp` plus header-only modules with `static` functions.
 
 `renderLevelSectored()` is the main level draw path. For each sector:
 1. Diffuse UVs are computed from world position via `computeTilingUV()` (Quake-style box mapping — picks XZ/ZY/XY plane based on which axis the face normal is most aligned with). Diffuse textures **tile** via `GL_REPEAT` and the OBJ UV set is ignored for them.
-2. Lightmap UVs come from the OBJ's UV set (unwrapped in Blender, baked in Cycles — see `leveldes.md`). Lightmap uses `GL_CLAMP_TO_EDGE`.
+2. Lightmap UVs come from the OBJ's UV set (unwrapped in Blender, baked in Cycles — see `docs/leveldes.md`). Lightmap uses `GL_CLAMP_TO_EDGE`.
 3. Both are combined with ARB_multitexture (`GL_MODULATE` on both units). When a lightmap is active, `GL_LIGHTING` is disabled — the baked lightmap already contains all static lighting, and GL lighting would re-add a directional bias that darkens ceilings.
 
 On Win98/old MinGW, `glActiveTextureARB` / `glMultiTexCoord2fARB` are not in the headers, so `initMultitexture()` loads them via `SDL_GL_GetProcAddress` into function pointers (`MT_ActiveTexture` / `MT_MultiTexCoord2f` macros). On Linux, the macros resolve directly to the GL symbols.
 
 ### Level data flow
 
-1. Blender → Wavefront OBJ with UVs + 24-bit BMP bakes (`leveldes.md` documents this pipeline).
-2. Entities are authored separately in `test_level.ent` (plain text, one entity per line: `type name group x y z rotY key=value...`).
+1. Blender → Wavefront OBJ with UVs + 24-bit BMP bakes (`docs/leveldes.md` documents this pipeline).
+2. Entities are authored separately in `assets/levels/test_level.ent` (plain text, one entity per line: `type name group x y z rotY key=value...`). Entity `mesh=` / `tex=` / `iqm=` paths point at `assets/models/…` and `assets/textures/…`.
 3. `main()`: loads OBJ, loads entities, finds player spawn from entities, inits physics from OBJ triangles, **then** calls `objBuildSectors()` (sorting must happen after physics init because sorting reorders `mesh->tris`).
-4. The legacy single-texture path (`renderLevel`) is still used when the OBJ has no materials — it loads `diffuse.bmp` + `lightmap.bmp` from the working directory.
+4. The legacy single-texture path (`renderLevel`) is still used when the OBJ has no materials — it loads `assets/levels/diffuse.bmp` + `assets/levels/lightmap.bmp` from the working directory.
 
 ## Constraints worth knowing before editing
 
@@ -67,4 +67,4 @@ On Win98/old MinGW, `glActiveTextureARB` / `glMultiTexCoord2fARB` are not in the
 - **No shaders.** Fixed-function only. Matrix math is done manually (`glSetPerspective`, `glLookAt` implemented in `main.cpp` — the system `gluPerspective`/`gluLookAt` aren't linked).
 - **Assets are relative-pathed.** Don't add `chdir` calls or absolute-path asset lookups.
 - **Header-only modules with `static` functions.** Don't split a module into .h/.cpp — every target compiles a single TU (`main.cpp`) plus Bullet. If you add a new module, follow the header-only `static` convention.
-- The `PLAN_*.md` / `leveldes.md` files are **design docs**, not generated output — read them to understand intended direction before large refactors.
+- The `docs/PLAN_*.md` / `docs/leveldes.md` files are **design docs**, not generated output — read them to understand intended direction before large refactors.

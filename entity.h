@@ -9,6 +9,7 @@
 #include "obj_loader.h"
 #include "texture.h"
 #include "iqm.h"
+#include "asset_registry.h"
 
 #define MAX_ENTITIES 256
 
@@ -23,7 +24,8 @@ enum EntityType {
     ENT_PLATFORM,
     ENT_SWITCH,
     ENT_TRIGGER,
-    ENT_DOOR
+    ENT_DOOR,
+    ENT_WAYPOINT   /* Pathing node; position-only, no mesh/physics. */
 };
 
 /* ---- Entity ---- */
@@ -197,7 +199,8 @@ static int entParseKV(const char *token, char *key, char *value)
 
 /* ---- Load entities from .ent file ---- */
 
-static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
+static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
+                       const AssetRegistry *reg)
 {
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -205,17 +208,9 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
         return 0;
     }
 
-    /* Extract directory for resolving mesh/texture paths */
-    char dir[256];
-    dir[0] = '\0';
-    const char *lastSlash = strrchr(filename, '/');
-    if (!lastSlash) lastSlash = strrchr(filename, '\\');
-    if (lastSlash) {
-        int dirLen = (int)(lastSlash - filename + 1);
-        if (dirLen > 255) dirLen = 255;
-        memcpy(dir, filename, dirLen);
-        dir[dirLen] = '\0';
-    }
+    /* mesh=/tex=/iqm= values are resolved through the asset registry first
+       (short logical names populated from assets.lua); unknown tokens are
+       used verbatim as paths relative to the repo root. */
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -247,6 +242,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
         else if (strcmp(tokens[0], "switch") == 0) type = ENT_SWITCH;
         else if (strcmp(tokens[0], "trigger") == 0) type = ENT_TRIGGER;
         else if (strcmp(tokens[0], "door") == 0) type = ENT_DOOR;
+        else if (strcmp(tokens[0], "waypoint") == 0) type = ENT_WAYPOINT;
         else { fprintf(stderr, "entity: unknown type '%s'\n", tokens[0]); continue; }
 
         int idx = entCreate(el, type);
@@ -275,9 +271,9 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache)
             char key[64], value[64];
             if (!entParseKV(tokens[i], key, value)) continue;
 
-            if (strcmp(key, "mesh") == 0) snprintf(meshPath, 256, "%s%s", dir, value);
-            else if (strcmp(key, "tex") == 0) snprintf(texPath, 256, "%s%s", dir, value);
-            else if (strcmp(key, "iqm") == 0) snprintf(iqmPath, 256, "%s%s", dir, value);
+            if (strcmp(key, "mesh") == 0) strncpy(meshPath, assetRegResolveModel(reg, value), 255);
+            else if (strcmp(key, "tex") == 0) strncpy(texPath, assetRegResolveTexture(reg, value), 255);
+            else if (strcmp(key, "iqm") == 0) strncpy(iqmPath, assetRegResolveModel(reg, value), 255);
             else if (strcmp(key, "anim") == 0) strncpy(initAnim, value, 63);
             else if (strcmp(key, "scale") == 0) e->scale = (float)atof(value);
             else if (strcmp(key, "static") == 0) e->isStatic = atoi(value);

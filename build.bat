@@ -32,27 +32,33 @@ if not exist "vendor\lib\libOpenAL32.a" (
 )
 
 REM ----------------------------------------------------------------
-REM  Bullet Physics (cached — delete bl.o/bc.o/bd.o to force rebuild)
+REM  Object output directory (gitignored)
 REM ----------------------------------------------------------------
-if exist bl.o (
+set "OBJDIR=raw\obj"
+if not exist "%OBJDIR%" mkdir "%OBJDIR%"
+
+REM ----------------------------------------------------------------
+REM  Bullet Physics (cached — delete raw\obj\bl.o/bc.o/bd.o to force rebuild)
+REM ----------------------------------------------------------------
+if exist %OBJDIR%\bl.o (
     echo Skipping Bullet Linear Math ^(bl.o cached^)
 ) else (
     echo Compiling Bullet Linear Math...
-    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o bl.o
+    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o %OBJDIR%\bl.o
     if errorlevel 1 goto error
 )
-if exist bc.o (
+if exist %OBJDIR%\bc.o (
     echo Skipping Bullet Collision ^(bc.o cached^)
 ) else (
     echo Compiling Bullet Collision...
-    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o bc.o
+    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o %OBJDIR%\bc.o
     if errorlevel 1 goto error
 )
-if exist bd.o (
+if exist %OBJDIR%\bd.o (
     echo Skipping Bullet Dynamics ^(bd.o cached^)
 ) else (
     echo Compiling Bullet Dynamics...
-    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o bd.o
+    C:\Dev-Cpp\bin\g++.exe -Ivendor\bullet3-3.25\src -O2 -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o %OBJDIR%\bd.o
     if errorlevel 1 goto error
 )
 
@@ -65,21 +71,21 @@ REM  -DLUA_ANSI disables loadlib dlopen / Win32 branches that Dev-C++ 3.4
 REM  can't satisfy. -Dluaall_c is Lua's own unity-build switch.
 REM ----------------------------------------------------------------
 echo Compiling Lua...
-C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
+C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o %OBJDIR%\lua.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling main...
-C:\Dev-Cpp\bin\g++.exe -Ivendor\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src -O2 -c main.cpp -o main.o
+C:\Dev-Cpp\bin\g++.exe -Ivendor\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src -O2 -c main.cpp -o %OBJDIR%\main.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-C:\Dev-Cpp\bin\g++.exe main.o bl.o bc.o bd.o lua.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
+C:\Dev-Cpp\bin\g++.exe %OBJDIR%\main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
 if errorlevel 1 goto error
 
 echo.

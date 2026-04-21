@@ -1,0 +1,41 @@
+# Entity definitions for test_level
+# Format: type name group posX posY posZ rotY [key=value ...]
+# mesh= / tex= / iqm= values are logical names from assets.lua; unknown
+# names fall through as raw paths relative to the repo root.
+
+# Player spawn point
+player spawn - 0 1 0 0
+
+# Animated decoration: mrfixit standing in Room 1
+decoration mrfixit_01 props -2 0 -1 0 iqm=mrfixit scale=0.225 flip_cull=1
+
+# Workstation in Room 1 (desk with CRT, keyboard, tower PC, and chair)
+# Desk origin is bottom-center; monitor+keyboard sit on desk top (assumed ~0.75m high)
+decoration office_desk_01   props -2.7  0    -3   0   mesh=office_desk  tex=wood1   collide=box
+decoration crt_monitor_01   props -2.9  0.8  -3.2 0   mesh=crt_monitor  tex=office  collide=box
+decoration keyboard_01      props -2.5  0.8  -3.2 0   mesh=keyboard     tex=office  collide=box
+decoration pc_tower_01      props -2.9  0.8  -2.7 0   mesh=pc_tower     tex=office  collide=box
+decoration office_chair_01  props -2    0    -3.2 200 mesh=office_chair tex=office  collide=box
+# Sliding door — rises 1.2m when triggered, auto-closes after 3s
+#door slide_door_01  props 2 0 -3 0  mesh=door tex=wood1  motion=slide  axis=Y amount=1.2 speed=2.0 auto_close=3.0
+#trigger slide_trigger - 2 1 -1 0  size=1.5,2,1.5 target=slide_door_01 once=0
+
+# Rotating door — swings 90° open, auto-closes after 3s.
+# Note: door.obj origin is not on the hinge edge, so the rotation looks like
+# it spins around its own center. Functional though — good for verifying rotate+sweep.
+door rotate_door_01  props 2 0.01 -3 0  mesh=door tex=wood1  motion=rotate axis=Y amount=90  speed=120 auto_close=3.0
+trigger rotate_trigger - 2 1 -1 0  size=1.5,2,1.5 target=rotate_door_01 once=0
+
+# Test trigger near the ramp
+trigger ramp_zone - 11 1 0 0 size=3,3,3 target=mrfixit_02 once=0
+
+# Waypoint nodes for the nav graph (Phase 1 of plan-enemies.md).
+# Edges are auto-generated at load via pairwise LOS raycasts. Toggle
+# the debug overlay with N in-game. These are placeholder positions
+# roughly spanning Room 1 / the corridor / the ramp — swap for real
+# coords once you've measured the level.
+waypoint wp_room1_a  nav -3   0 -1   0
+waypoint wp_room1_b  nav -1   0 -3   0
+waypoint wp_room1_c  nav  1   0 -1   0
+waypoint wp_corridor nav  4   0  0   0
+waypoint wp_ramp     nav  11  1  0   0

@@ -37,40 +37,46 @@ echo.
 set "OPTS=-O2 -Ivendor_win10\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src"
 
 REM ----------------------------------------------------------------
-REM  Compile Bullet Physics (cached — delete bl.o/bc.o/bd.o to force rebuild)
+REM  Object output directory (gitignored)
 REM ----------------------------------------------------------------
-if exist bl.o (
+set "OBJDIR=raw\obj"
+if not exist "%OBJDIR%" mkdir "%OBJDIR%"
+
+REM ----------------------------------------------------------------
+REM  Compile Bullet Physics (cached — delete raw\obj\bl.o/bc.o/bd.o to force rebuild)
+REM ----------------------------------------------------------------
+if exist %OBJDIR%\bl.o (
     echo Skipping Bullet Linear Math ^(bl.o cached^)
 ) else (
     echo Compiling Bullet Linear Math...
-    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o bl.o
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btLinearMathAll.cpp -o %OBJDIR%\bl.o
     if errorlevel 1 goto error
 )
 
-if exist bc.o (
+if exist %OBJDIR%\bc.o (
     echo Skipping Bullet Collision ^(bc.o cached^)
 ) else (
     echo Compiling Bullet Collision...
-    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o bc.o
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletCollisionAll.cpp -o %OBJDIR%\bc.o
     if errorlevel 1 goto error
 )
 
-if exist bd.o (
+if exist %OBJDIR%\bd.o (
     echo Skipping Bullet Dynamics ^(bd.o cached^)
 ) else (
     echo Compiling Bullet Dynamics...
-    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o bd.o
+    %GPP% %OPTS% -c vendor\bullet3-3.25\src\btBulletDynamicsAll.cpp -o %OBJDIR%\bd.o
     if errorlevel 1 goto error
 )
 
 REM ----------------------------------------------------------------
-REM  Lua 5.1.5 (cached — delete lua.o to force rebuild)
+REM  Lua 5.1.5 (cached — delete raw\obj\lua.o to force rebuild)
 REM ----------------------------------------------------------------
-if exist lua.o (
+if exist %OBJDIR%\lua.o (
     echo Skipping Lua ^(lua.o cached^)
 ) else (
     echo Compiling Lua...
-    %GCC% -Ivendor\lua-5.1.5\src -Dluaall_c -O2 -c vendor\lua-5.1.5\src\lua_all.c -o lua.o
+    %GCC% -Ivendor\lua-5.1.5\src -Dluaall_c -O2 -c vendor\lua-5.1.5\src\lua_all.c -o %OBJDIR%\lua.o
     if errorlevel 1 goto error
 )
 
@@ -78,18 +84,18 @@ REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling SDL main stub...
-%GCC% -c vendor_win10\sdl_main.c -o sdl_main.o
+%GCC% -c vendor_win10\sdl_main.c -o %OBJDIR%\sdl_main.o
 if errorlevel 1 goto error
 
 echo Compiling main...
-%GPP% %OPTS% -c main.cpp -o main.o
+%GPP% %OPTS% -c main.cpp -o %OBJDIR%\main.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-%GPP% main.o sdl_main.o bl.o bc.o bd.o lua.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
+%GPP% %OBJDIR%\main.o %OBJDIR%\sdl_main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------

@@ -3,6 +3,7 @@
 *.exe
 sdlfun
 build/
+raw/obj/
 
 # Temp/log files
 output.txt
