@@ -39,3 +39,4 @@ All art, level, and texture assets in this repository are **© Dynart**, all rig
 
 The following assets are **not** original and are bundled under their own terms:
 - `assets/models/mrfixit.iqm`, `assets/textures/Head.tga`, `assets/textures/Body.tga` — from Lee Salzman's IQM sample pack. See the original IQM distribution for licensing.
+- `assets/fonts/orbitron*.fnt` + `assets/fonts/orbitron*.tga` — BMFont bakes of Orbitron by Matt McInerney, licensed under the SIL Open Font License 1.1.

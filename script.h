@@ -210,6 +210,10 @@ static void scr_onTexture(ScriptSystem *s, const char *name, const char *path)
 {
     assetRegAddTexture(s->assets, name, path);
 }
+static void scr_onFont(ScriptSystem *s, const char *name, const char *path)
+{
+    uiFontLoad(&s->ui->fonts, name, path);
+}
 
 /* Load the asset manifest (expected to `return` a table shaped like
    assets.lua). Walks manifest.sounds / manifest.models / manifest.textures
@@ -249,9 +253,13 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     int textures = scr_walkStringTable(L, s, scr_onTexture);
     lua_pop(L, 1);
 
+    lua_getfield(L, -1, "fonts");
+    int fonts = scr_walkStringTable(L, s, scr_onFont);
+    lua_pop(L, 1);
+
     lua_pop(L, 2);  /* manifest, traceback */
-    printf("assets: %d sound(s), %d model(s), %d texture(s) registered from %s\n",
-           sounds, models, textures, path);
+    printf("assets: %d sound(s), %d model(s), %d texture(s), %d font(s) registered from %s\n",
+           sounds, models, textures, fonts, path);
     return 1;
 }
 

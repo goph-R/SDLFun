@@ -37,6 +37,17 @@ return {
         wood1  = "assets/textures/wood1.bmp",
     },
 
+    -- BMFont (AngelCode) bitmap fonts. Each entry points at a .fnt text file;
+    -- the .fnt carries the atlas filename (a 32-bit TGA in the same directory)
+    -- and per-glyph metrics. "default" is the font used when a uiText call
+    -- passes no explicit font name — alias it to whichever font you want as
+    -- the HUD baseline.
+    fonts = {
+        default        = "assets/fonts/orbitron_small.fnt",
+        orbitron       = "assets/fonts/orbitron.fnt",
+        orbitron_small = "assets/fonts/orbitron_small.fnt",
+    },
+
     levels = {
         level1 = { obj = "assets/levels/test_level.obj", ent = "assets/levels/test_level.ent" },
         -- level2 = { obj = "...", ent = "..." },
