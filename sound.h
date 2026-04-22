@@ -41,12 +41,12 @@ static int sndInit(SoundSystem *s, int /*sampleRate*/)
 {
     s->device = alcOpenDevice(NULL);
     if (!s->device) {
-        fprintf(stderr, "OpenAL: alcOpenDevice failed\n");
+        conLogf("OpenAL: alcOpenDevice failed\n");
         return 0;
     }
     s->context = alcCreateContext(s->device, NULL);
     if (!s->context) {
-        fprintf(stderr, "OpenAL: alcCreateContext failed\n");
+        conLogf("OpenAL: alcCreateContext failed\n");
         alcCloseDevice(s->device);
         return 0;
     }
@@ -87,11 +87,11 @@ static SoundBuffer sndLoadWav(const char *path)
     Uint8 *data = NULL;
     Uint32 len  = 0;
     if (!SDL_LoadWAV(path, &spec, &data, &len)) {
-        fprintf(stderr, "sndLoadWav: %s: %s\n", path, SDL_GetError());
+        conLogf("sndLoadWav: %s: %s\n", path, SDL_GetError());
         return 0;
     }
     if (spec.format != AUDIO_S16LSB && spec.format != AUDIO_S16SYS) {
-        fprintf(stderr, "sndLoadWav: %s: unsupported format 0x%x (need 16-bit PCM)\n",
+        conLogf("sndLoadWav: %s: unsupported format 0x%x (need 16-bit PCM)\n",
                 path, (unsigned)spec.format);
         SDL_FreeWAV(data);
         return 0;
@@ -112,7 +112,7 @@ static SoundBuffer sndLoadWav(const char *path)
         out = sndMakeBuffer(mono, frames, spec.freq);
         free(mono);
     } else {
-        fprintf(stderr, "sndLoadWav: %s: unsupported channel count %d\n",
+        conLogf("sndLoadWav: %s: unsupported channel count %d\n",
                 path, (int)spec.channels);
     }
     SDL_FreeWAV(data);
@@ -139,7 +139,7 @@ static void sndLibRegister(SoundLibrary *lib, const char *name, SoundBuffer b)
 {
     if (!b) return;  /* load failed upstream; don't register a zero handle */
     if (lib->count >= SND_MAX_NAMED) {
-        fprintf(stderr, "sndLibRegister: registry full, dropping '%s'\n", name);
+        conLogf("sndLibRegister: registry full, dropping '%s'\n", name);
         return;
     }
     int i = lib->count++;

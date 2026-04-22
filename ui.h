@@ -150,15 +150,18 @@ static const unsigned char ui_font8x8[128][8] = {
 #define UI_CELL_PX      10   /* glyph + 1px border each side */
 
 /* Virtual canvas: UI coordinates are in "virtual pixels" relative to a
-   fixed 1080-unit height. Virtual width scales with aspect ratio so
+   fixed 540-unit height. Virtual width scales with aspect ratio so
    wider screens show more horizontal space, not stretched text. The
    origin (0, 0) is at screen CENTER; Y grows down (screen convention).
      top edge    y = -uiGetHeight() / 2
      bottom edge y = +uiGetHeight() / 2
      left edge   x = -uiGetWidth()  / 2
      right edge  x = +uiGetWidth()  / 2
-*/
-#define UI_VIRTUAL_H 1080.0f
+   The canvas was halved from 1080 to 540 so text (sized in virtual pixels
+   via uiText's scale arg) appears roughly twice as large on screen. All
+   layout constants in main.cpp / menu.h / console.h were halved at the
+   same time to preserve their relative screen positions. */
+#define UI_VIRTUAL_H 540.0f
 
 struct UiRect  { float x, y, w, h; };
 struct UiColor { float r, g, b, a; };
@@ -300,7 +303,7 @@ static void uiInit(UiState *ui, int screenW, int screenH)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, UI_ATLAS_W, UI_ATLAS_H, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, px);
     free(px);
-    printf("ui: font atlas %dx%d built\n", UI_ATLAS_W, UI_ATLAS_H);
+    conLogf("ui: font atlas %dx%d built\n", UI_ATLAS_W, UI_ATLAS_H);
 
     ui->fonts.count = 0;
 }
@@ -330,13 +333,13 @@ static GLuint uiLoadTGA32(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) {
-        fprintf(stderr, "ui: cannot open font atlas %s\n", path);
+        conLogf("ui: cannot open font atlas %s\n", path);
         return 0;
     }
     unsigned char hdr[18];
     if (fread(hdr, 1, 18, f) != 18) { fclose(f); return 0; }
     if (hdr[2] != 2 || hdr[16] != 32) {
-        fprintf(stderr, "ui: %s must be uncompressed 32-bit TGA\n", path);
+        conLogf("ui: %s must be uncompressed 32-bit TGA\n", path);
         fclose(f);
         return 0;
     }
@@ -415,7 +418,7 @@ static int uiFntQuoted(const char *line, const char *key, char *out, int outSz)
 static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
 {
     if (lib->count >= UI_FONT_MAX) {
-        fprintf(stderr, "ui: font library full, cannot load '%s'\n", name);
+        conLogf("ui: font library full, cannot load '%s'\n", name);
         return 0;
     }
 
@@ -430,7 +433,7 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
             dst->name[UI_FONT_NAME_MAX - 1] = '\0';
             dst->ownsTex = 0;
             lib->count++;
-            printf("ui: font '%s' aliased to '%s' (%s)\n",
+            conLogf("ui: font '%s' aliased to '%s' (%s)\n",
                    name, src->name, fntPath);
             return 1;
         }
@@ -438,7 +441,7 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
 
     FILE *f = fopen(fntPath, "rb");
     if (!f) {
-        fprintf(stderr, "ui: cannot open .fnt %s\n", fntPath);
+        conLogf("ui: cannot open .fnt %s\n", fntPath);
         return 0;
     }
 
@@ -485,7 +488,7 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
     fclose(f);
 
     if (!atlasFile[0]) {
-        fprintf(stderr, "ui: %s missing 'page file=\"...\"' line\n", fntPath);
+        conLogf("ui: %s missing 'page file=\"...\"' line\n", fntPath);
         return 0;
     }
 
@@ -511,7 +514,7 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
     if (!font->tex) return 0;
 
     lib->count++;
-    printf("ui: font '%s' loaded from %s (line %d, base %d, atlas %dx%d)\n",
+    conLogf("ui: font '%s' loaded from %s (line %d, base %d, atlas %dx%d)\n",
            name, fntPath, font->lineHeight, font->base,
            font->atlasW, font->atlasH);
     return 1;
@@ -569,6 +572,29 @@ static void uiEnd(UiState * /*ui*/)
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
     glPopMatrix();
+}
+
+/* Rendered width of `text` in virtual pixels, using the same metrics
+   uiText uses internally. Lets callers (e.g. the dev console) place
+   glyphs after a previous draw without hand-rolling the scale math. */
+static float uiTextWidth(UiState *ui, const char *text, float scale,
+                         const char *fontName = NULL)
+{
+    UiFont *font = uiFontFind(&ui->fonts, fontName);
+    if (!font) {
+        /* 8x8 fallback is monospace: one cell per char. */
+        int len = 0;
+        for (const char *p = text; *p; p++) len++;
+        return len * 8.0f * scale;
+    }
+    float rs = (scale * 8.0f) / (float)font->lineHeight;
+    float w = 0.0f;
+    for (const char *p = text; *p; p++) {
+        unsigned char ch = (unsigned char)*p;
+        if (ch >= UI_FONT_GLYPH_MAX || !font->glyphs[ch].valid) ch = '?';
+        w += font->glyphs[ch].xadvance * rs;
+    }
+    return w;
 }
 
 /* Filled, flat-colored rectangle. */
@@ -745,7 +771,7 @@ static void uiDrawMessage(UiState *ui)
 /* Horizontal progress bar: dark background, white border, colored fill.
    Border is 3 virtual px — thick enough to stay readable on low-res
    displays once the virtual canvas is scaled down. fillPct clamped [0,1]. */
-#define UI_BAR_BORDER 3.0f
+#define UI_BAR_BORDER 2.0f
 static void uiBar(UiRect r, float fillPct, UiColor fill)
 {
     if (fillPct < 0.0f) fillPct = 0.0f;

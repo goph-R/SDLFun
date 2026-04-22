@@ -94,7 +94,7 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     pw->capsuleShape = new btCapsuleShape(playerRadius, capsuleHeight);
 
     /* Diagnostic: what Bullet actually sees */
-    printf("[phys] capsule: radius=%.3f halfHeight=%.3f margin=%.3f upAxis=%d\n",
+    conLogf("[phys] capsule: radius=%.3f halfHeight=%.3f margin=%.3f upAxis=%d\n",
            (float)pw->capsuleShape->getRadius(),
            (float)pw->capsuleShape->getHalfHeight(),
            (float)pw->capsuleShape->getMargin(),

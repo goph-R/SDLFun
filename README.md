@@ -18,7 +18,7 @@ Quick reference:
 
 Boot lands on the main menu. Up/Down + Enter (or mouse) navigate the CONTINUE / NEW GAME / OPTIONS / EXIT buttons. The exit dialog uses Left/Right + Enter / Esc.
 
-In-game: WASD move, mouse look, Space jump, F flashlight, Left-click fire, Esc back to menu.
+In-game: WASD move, mouse look, Space jump, F flashlight, Left-click fire, backtick (`) drops down the dev console (Lua REPL), Esc back to menu.
 
 CLI flags: `-w <width>`, `-h <height>`, `-fullscreen`.
 

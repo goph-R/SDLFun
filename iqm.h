@@ -250,19 +250,19 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
     memset(mdl, 0, sizeof(IqmModel));
 
     FILE *f = fopen(filename, "rb");
-    if (!f) { fprintf(stderr, "iqm: cannot open %s\n", filename); return 0; }
+    if (!f) { conLogf("iqm: cannot open %s\n", filename); return 0; }
 
     /* Read header */
     IqmHeader hdr;
     if (fread(&hdr, 1, sizeof(hdr), f) != sizeof(hdr) ||
         memcmp(hdr.magic, IQM_MAGIC, 16) != 0 || hdr.version != IQM_VERSION) {
-        fprintf(stderr, "iqm: invalid header in %s\n", filename);
+        conLogf("iqm: invalid header in %s\n", filename);
         fclose(f);
         return 0;
     }
 
     if (hdr.filesize > 16 * 1024 * 1024) {
-        fprintf(stderr, "iqm: file too large %s\n", filename);
+        conLogf("iqm: file too large %s\n", filename);
         fclose(f);
         return 0;
     }
@@ -272,7 +272,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
     memcpy(mdl->fileData, &hdr, sizeof(hdr));
     if (fread(mdl->fileData + sizeof(hdr), 1, hdr.filesize - sizeof(hdr), f) !=
         hdr.filesize - sizeof(hdr)) {
-        fprintf(stderr, "iqm: read error %s\n", filename);
+        conLogf("iqm: read error %s\n", filename);
         fclose(f);
         iqmFree(mdl);
         return 0;
@@ -297,7 +297,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
     }
 
     if (!mdl->inPosition) {
-        fprintf(stderr, "iqm: no position data in %s\n", filename);
+        conLogf("iqm: no position data in %s\n", filename);
         iqmFree(mdl);
         return 0;
     }
@@ -319,7 +319,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
         mdl->meshes[i].firstTri = mi->first_triangle;
         mdl->meshes[i].numTris = mi->num_triangles;
         mdl->meshes[i].texID = 0;
-        printf("iqm: mesh %d: '%s' material='%s' (%d verts, %d tris)\n",
+        conLogf("iqm: mesh %d: '%s' material='%s' (%d verts, %d tris)\n",
                i, mdl->meshes[i].name, mdl->meshes[i].materialName,
                mi->num_vertexes, mi->num_triangles);
     }
@@ -345,7 +345,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
         }
     }
 
-    printf("iqm: %d bones\n", mdl->numBones);
+    conLogf("iqm: %d bones\n", mdl->numBones);
 
     /* ---- Parse animations and pre-compute frame matrices ---- */
     mdl->numFrames = (int)hdr.num_frames;
@@ -360,7 +360,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
             mdl->anims[i].numFrames = animInfos[i].num_frames;
             mdl->anims[i].framerate = animInfos[i].framerate;
             mdl->anims[i].loop = (animInfos[i].flags & IQM_LOOP) ? 1 : 0;
-            printf("iqm: anim %d: '%s' (%d frames, %.1f fps, %s)\n",
+            conLogf("iqm: anim %d: '%s' (%d frames, %.1f fps, %s)\n",
                    i, mdl->anims[i].name, mdl->anims[i].numFrames,
                    mdl->anims[i].framerate, mdl->anims[i].loop ? "loop" : "once");
         }
@@ -408,7 +408,7 @@ static int iqmLoad(IqmModel *mdl, const char *filename)
     mdl->outNormal   = (float *)malloc(mdl->numVerts * 3 * sizeof(float));
     mdl->outBones    = (Mat34 *)malloc(mdl->numBones * sizeof(Mat34));
 
-    printf("iqm: loaded %s (%d verts, %d tris, %d bones, %d anims, %d frames)\n",
+    conLogf("iqm: loaded %s (%d verts, %d tris, %d bones, %d anims, %d frames)\n",
            filename, mdl->numVerts, mdl->numTris, mdl->numBones,
            mdl->numAnims, mdl->numFrames);
     return 1;

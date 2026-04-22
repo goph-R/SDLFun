@@ -63,19 +63,19 @@ static GLuint loadBMPEx(const char *filename, int wrapMode)
     fread(&ih, sizeof(ih), 1, f);
 
     if (fh.type != 0x4D42) { /* 'BM' */
-        fprintf(stderr, "texture: %s is not a BMP file\n", filename);
+        conLogf("texture: %s is not a BMP file\n", filename);
         fclose(f);
         return 0;
     }
 
     if (ih.bitCount != 24 && ih.bitCount != 32) {
-        fprintf(stderr, "texture: %s is %d-bit, need 24 or 32\n", filename, ih.bitCount);
+        conLogf("texture: %s is %d-bit, need 24 or 32\n", filename, ih.bitCount);
         fclose(f);
         return 0;
     }
 
     if (ih.compression != 0) {
-        fprintf(stderr, "texture: %s is compressed, not supported\n", filename);
+        conLogf("texture: %s is compressed, not supported\n", filename);
         fclose(f);
         return 0;
     }
@@ -110,7 +110,7 @@ static GLuint loadBMPEx(const char *filename, int wrapMode)
     GLuint texID = uploadTexture(rgbData, width, height, wrapMode);
     free(rgbData);
 
-    printf("texture: loaded %s (%dx%d)\n", filename, width, height);
+    conLogf("texture: loaded %s (%dx%d)\n", filename, width, height);
     return texID;
 }
 
@@ -128,13 +128,13 @@ static GLuint loadTGAEx(const char *filename, int wrapMode)
     int bpp = header[16] / 8;
 
     if (bpp != 3 && bpp != 4) {
-        fprintf(stderr, "texture: %s is %d-bit, need 24 or 32\n", filename, bpp * 8);
+        conLogf("texture: %s is %d-bit, need 24 or 32\n", filename, bpp * 8);
         fclose(f);
         return 0;
     }
 
     if (header[2] != 2) { /* uncompressed true-color only */
-        fprintf(stderr, "texture: %s is not uncompressed true-color TGA\n", filename);
+        conLogf("texture: %s is not uncompressed true-color TGA\n", filename);
         fclose(f);
         return 0;
     }
@@ -166,7 +166,7 @@ static GLuint loadTGAEx(const char *filename, int wrapMode)
     GLuint texID = uploadTexture(rgbData, width, height, wrapMode);
     free(rgbData);
 
-    printf("texture: loaded %s (%dx%d)\n", filename, width, height);
+    conLogf("texture: loaded %s (%dx%d)\n", filename, width, height);
     return texID;
 }
 
@@ -182,7 +182,7 @@ static GLuint loadTextureEx(const char *filename, int wrapMode)
                     strcmp(filename + len - 4, ".TGA") == 0)) {
         return loadTGAEx(filename, wrapMode);
     }
-    fprintf(stderr, "texture: unknown format for %s (use .bmp or .tga)\n", filename);
+    conLogf("texture: unknown format for %s (use .bmp or .tga)\n", filename);
     return 0;
 }
 

@@ -153,16 +153,16 @@ static void screenStackClear(ScreenStack *st) { st->count = 0; }
 
 /* ---- Menu layout constants ---- */
 
-#define MENU_PADDING      60.0f
-#define MENU_BTN_W        380.0f
-#define MENU_BTN_H        56.0f
-#define MENU_BTN_GAP      14.0f
-#define MENU_LOGO_H       96.0f   /* virtual-px tall, aspect preserved */
-#define MENU_DIALOG_W     720.0f
-#define MENU_DIALOG_H     300.0f
-#define MENU_DLG_BTN_W    200.0f
-#define MENU_DLG_BTN_H    56.0f
-#define MENU_DLG_PAD      40.0f
+#define MENU_PADDING      30.0f
+#define MENU_BTN_W        190.0f
+#define MENU_BTN_H        36.0f   /* a touch taller than exact half to fit 24-vpx button text comfortably */
+#define MENU_BTN_GAP      7.0f
+#define MENU_LOGO_H       48.0f   /* virtual-px tall, aspect preserved */
+#define MENU_DIALOG_W     360.0f
+#define MENU_DIALOG_H     170.0f
+#define MENU_DLG_BTN_W    110.0f
+#define MENU_DLG_BTN_H    36.0f
+#define MENU_DLG_PAD      20.0f
 
 /* ---- Screen constructors ---- */
 
@@ -334,7 +334,7 @@ static void menuDrawButton(UiState *ui, const MenuButton *b, int focused)
     }
     uiQuad(b->rect, bg);
     /* Text anchored at vertical middle of the button, left-padded. */
-    float tx = b->rect.x + 24.0f;
+    float tx = b->rect.x + 12.0f;
     float ty = b->rect.y + b->rect.h * 0.5f;
     uiText(ui, tx, ty, fg, b->label, 3.0f,
            UI_ALIGN_MIDDLE | UI_ALIGN_LEFT, "button_font");
@@ -466,7 +466,7 @@ static UiRect dialogBtnRect(UiState *ui, int which /* 0=OK, 1=Cancel */)
 {
     UiRect r = dialogRect(ui);
     float bw = MENU_DLG_BTN_W, bh = MENU_DLG_BTN_H;
-    float gap = 20.0f;
+    float gap = 10.0f;
     float totalW = bw * 2 + gap;
     float bx = r.x + (r.w - totalW) * 0.5f + (which == 0 ? 0 : bw + gap);
     float by = r.y + r.h - MENU_DLG_PAD - bh;
@@ -538,7 +538,7 @@ static void dialogRender(Dialog *d, AppState *app)
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, bgTex);
         glColor4f(1, 1, 1, 1);
-        float tileVirtual = 64.0f;
+        float tileVirtual = 32.0f;
         float u1 = r.w / tileVirtual;
         float v1 = r.h / tileVirtual;
         glBegin(GL_QUADS);

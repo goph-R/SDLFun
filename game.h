@@ -61,10 +61,10 @@ static int gameInit(Game *g,
 
     objInit(&g->level);
     if (!objLoad(&g->level, levelObj)) {
-        fprintf(stderr, "game: failed to load %s\n", levelObj);
+        conLogf("game: failed to load %s\n", levelObj);
         return 0;
     }
-    printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
+    conLogf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
            g->level.numVerts, g->level.numTexcoords,
            g->level.numTris, g->level.numMaterials);
 
@@ -104,7 +104,7 @@ static int gameInit(Game *g,
             e->physBody = physAddStaticTrimesh(&g->phys, &e->mesh,
                                                e->posX, e->posY, e->posZ,
                                                e->rotY, s);
-            printf("entity: %s collider (trimesh %d tris at %.2f,%.2f,%.2f)\n",
+            conLogf("entity: %s collider (trimesh %d tris at %.2f,%.2f,%.2f)\n",
                    e->name, e->mesh.numTris, e->posX, e->posY, e->posZ);
             continue;
         }
@@ -139,12 +139,12 @@ static int gameInit(Game *g,
             e->door.lcz = lcz;
             e->physBody = physAddKinematicBox(&g->phys, wx, wy, wz,
                                               hx, hy, hz, e->rotY);
-            printf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
+            conLogf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
                    e->name, hx*2, hy*2, hz*2);
         } else {
             e->physBody = physAddStaticBox(&g->phys, wx, wy, wz,
                                            hx, hy, hz, e->rotY);
-            printf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
+            conLogf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
                    e->name, hx*2, hy*2, hz*2, wx, wy, wz);
         }
     }

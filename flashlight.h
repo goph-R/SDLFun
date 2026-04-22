@@ -159,7 +159,7 @@ static void dynLmBuildWorldPosMap(DynLightmap *dl, ObjMesh *mesh)
                       tc2->u, tc2->v, v2->x, v2->y, v2->z);
         rasterized++;
     }
-    printf("flashlight: rasterized %d triangles into %dx%d worldPosMap\n",
+    conLogf("flashlight: rasterized %d triangles into %dx%d worldPosMap\n",
            rasterized, dl->width, dl->height);
 }
 
@@ -223,7 +223,7 @@ static int dynLmInit(DynLightmap *dl, const char *lmPath, ObjMesh *mesh, GLuint 
     /* Build the world position lookup from level mesh */
     dynLmBuildWorldPosMap(dl, mesh);
 
-    printf("flashlight: dynamic lightmap ready (%dx%d, tex=%u)\n",
+    conLogf("flashlight: dynamic lightmap ready (%dx%d, tex=%u)\n",
            dl->width, dl->height, dl->texID);
     return 1;
 }

@@ -204,7 +204,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
 {
     FILE *f = fopen(filename, "r");
     if (!f) {
-        printf("entity: no .ent file (%s), using defaults\n", filename);
+        conLogf("entity: no .ent file (%s), using defaults\n", filename);
         return 0;
     }
 
@@ -243,10 +243,10 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
         else if (strcmp(tokens[0], "trigger") == 0) type = ENT_TRIGGER;
         else if (strcmp(tokens[0], "door") == 0) type = ENT_DOOR;
         else if (strcmp(tokens[0], "waypoint") == 0) type = ENT_WAYPOINT;
-        else { fprintf(stderr, "entity: unknown type '%s'\n", tokens[0]); continue; }
+        else { conLogf("entity: unknown type '%s'\n", tokens[0]); continue; }
 
         int idx = entCreate(el, type);
-        if (idx < 0) { fprintf(stderr, "entity: max entities reached\n"); break; }
+        if (idx < 0) { conLogf("entity: max entities reached\n"); break; }
         Entity *e = &el->entities[idx];
 
         /* Name and group ("-" means none) */
@@ -353,12 +353,12 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
             }
         }
 
-        printf("entity: [%d] type=%s name='%s' group='%s' pos=(%.1f,%.1f,%.1f)\n",
+        conLogf("entity: [%d] type=%s name='%s' group='%s' pos=(%.1f,%.1f,%.1f)\n",
                idx, tokens[0], e->name, e->group, e->posX, e->posY, e->posZ);
     }
 
     fclose(f);
-    printf("entity: loaded %d entities from %s\n", el->count, filename);
+    conLogf("entity: loaded %d entities from %s\n", el->count, filename);
     return 1;
 }
 
@@ -388,7 +388,7 @@ static void entUpdate(EntityList *el, float playerX, float playerY, float player
                 if (dist < 1.0f) {
                     e->item.picked = 1;
                     e->active = 0;
-                    printf("entity: picked up '%s'\n", e->name);
+                    conLogf("entity: picked up '%s'\n", e->name);
                 }
             }
             break;
@@ -405,7 +405,7 @@ static void entUpdate(EntityList *el, float playerX, float playerY, float player
                 if (dx > -sx && dx < sx && dy > -sy && dy < sy && dz > -sz && dz < sz) {
                     if (!e->trigger.triggered) {
                         e->trigger.triggered = 1;
-                        printf("entity: trigger '%s' fired -> '%s'\n", e->name, e->trigger.target);
+                        conLogf("entity: trigger '%s' fired -> '%s'\n", e->name, e->trigger.target);
                         if (e->trigger.target[0])
                             entActivate(el, e->trigger.target);
                     }

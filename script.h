@@ -27,6 +27,7 @@ extern "C" {
 }
 
 #include "asset_registry.h"
+#include "console.h"
 
 struct ScriptSystem {
     lua_State     *L;
@@ -62,7 +63,7 @@ static int scr_snd_play(lua_State *L)
     const char *name = luaL_checkstring(L, 1);
     SoundBuffer b = sndLibFind(s->sndLib, name);
     if (!b) {
-        fprintf(stderr, "snd_play: unknown sound '%s'\n", name);
+        conLogf("snd_play: unknown sound '%s'\n", name);
         return 0;
     }
     sndPlay(s->snd, b);
@@ -130,7 +131,7 @@ static int scriptInit(ScriptSystem *s, UiState *ui, SoundSystem *snd,
 
     s->L = luaL_newstate();
     if (!s->L) {
-        fprintf(stderr, "script: luaL_newstate failed\n");
+        conLogf("script: luaL_newstate failed\n");
         return 0;
     }
     luaL_openlibs(s->L);
@@ -146,7 +147,7 @@ static int scriptInit(ScriptSystem *s, UiState *ui, SoundSystem *snd,
     lua_register(s->L, "snd_play",        scr_snd_play);
     lua_register(s->L, "ent_activate",    scr_ent_activate);
 
-    printf("script: Lua %s initialised\n", LUA_VERSION);
+    conLogf("script: Lua %s initialised\n", LUA_VERSION);
     return 1;
 }
 
@@ -163,12 +164,12 @@ static int scriptRunFile(ScriptSystem *s, const char *path)
     int tbidx = lua_gettop(s->L);
 
     if (luaL_loadfile(s->L, path) != 0) {
-        fprintf(stderr, "script: load %s: %s\n", path, lua_tostring(s->L, -1));
+        conLogf("script: load %s: %s\n", path, lua_tostring(s->L, -1));
         lua_pop(s->L, 2);
         return 0;
     }
     if (lua_pcall(s->L, 0, 0, tbidx) != 0) {
-        fprintf(stderr, "script: run %s: %s\n", path, lua_tostring(s->L, -1));
+        conLogf("script: run %s: %s\n", path, lua_tostring(s->L, -1));
         lua_pop(s->L, 2);
         return 0;
     }
@@ -226,17 +227,17 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     int tbidx = lua_gettop(L);
 
     if (luaL_loadfile(L, path) != 0) {
-        fprintf(stderr, "script: load %s: %s\n", path, lua_tostring(L, -1));
+        conLogf("script: load %s: %s\n", path, lua_tostring(L, -1));
         lua_pop(L, 2);
         return 0;
     }
     if (lua_pcall(L, 0, 1, tbidx) != 0) {
-        fprintf(stderr, "script: run %s: %s\n", path, lua_tostring(L, -1));
+        conLogf("script: run %s: %s\n", path, lua_tostring(L, -1));
         lua_pop(L, 2);
         return 0;
     }
     if (!lua_istable(L, -1)) {
-        fprintf(stderr, "script: %s must return a table\n", path);
+        conLogf("script: %s must return a table\n", path);
         lua_pop(L, 2);
         return 0;
     }
@@ -258,9 +259,64 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     lua_pop(L, 1);
 
     lua_pop(L, 2);  /* manifest, traceback */
-    printf("assets: %d sound(s), %d model(s), %d texture(s), %d font(s) registered from %s\n",
+    conLogf("assets: %d sound(s), %d model(s), %d texture(s), %d font(s) registered from %s\n",
            sounds, models, textures, fonts, path);
     return 1;
+}
+
+/* ---- Console integration ---- */
+
+/* Lua `print` override — joins args with tabs (standard print behavior)
+   and routes the resulting line through conLogf so the dev console shows
+   Lua output. Also still writes to stdout via conLogf's tee. */
+static int scr_print(lua_State *L)
+{
+    int n = lua_gettop(L);
+    char buf[512];
+    int pos = 0;
+    lua_getglobal(L, "tostring");
+    for (int i = 1; i <= n; i++) {
+        lua_pushvalue(L, -1);   /* tostring */
+        lua_pushvalue(L, i);
+        lua_call(L, 1, 1);
+        const char *s = lua_tostring(L, -1);
+        if (!s) s = "(nil)";
+        if (pos > 0 && pos < (int)sizeof(buf) - 1) buf[pos++] = '\t';
+        while (*s && pos < (int)sizeof(buf) - 1) buf[pos++] = *s++;
+        lua_pop(L, 1);          /* result of tostring */
+    }
+    lua_pop(L, 1);              /* tostring itself */
+    buf[pos] = '\0';
+    conLogf("%s\n", buf);
+    return 0;
+}
+
+static void scriptInstallConsolePrint(ScriptSystem *s)
+{
+    lua_register(s->L, "print", scr_print);
+}
+
+/* Execute the console's command buffer as a Lua chunk. Caller clears the
+   command afterwards. Compile and runtime errors are formatted and pushed
+   to the scrollback; successful calls with no output just complete
+   silently (use print() to see values). */
+static void conExecute(Console *c, ScriptSystem *s)
+{
+    conLogf("> %s\n", c->cmd);
+    lua_State *L = s->L;
+    lua_pushcfunction(L, scr_traceback);
+    int tbidx = lua_gettop(L);
+    if (luaL_loadstring(L, c->cmd) != 0) {
+        conLogf("%s\n", lua_tostring(L, -1));
+        lua_pop(L, 2);   /* error + traceback */
+        return;
+    }
+    if (lua_pcall(L, 0, 0, tbidx) != 0) {
+        conLogf("%s\n", lua_tostring(L, -1));
+        lua_pop(L, 2);
+        return;
+    }
+    lua_pop(L, 1);       /* traceback */
 }
 
 /* Call a nullary global function if it exists. Missing function is a
@@ -277,7 +333,7 @@ static int scriptCall(ScriptSystem *s, const char *fn)
         return 0;
     }
     if (lua_pcall(s->L, 0, 0, tbidx) != 0) {
-        fprintf(stderr, "script: %s(): %s\n", fn, lua_tostring(s->L, -1));
+        conLogf("script: %s(): %s\n", fn, lua_tostring(s->L, -1));
         lua_pop(s->L, 2);
         return 0;
     }

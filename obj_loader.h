@@ -178,7 +178,7 @@ static void objLoadMtl(ObjMesh *m, const char *mtlPath)
 {
     FILE *f = fopen(mtlPath, "r");
     if (!f) {
-        fprintf(stderr, "obj: cannot open MTL %s\n", mtlPath);
+        conLogf("obj: cannot open MTL %s\n", mtlPath);
         return;
     }
 
@@ -223,7 +223,7 @@ static void objLoadMtl(ObjMesh *m, const char *mtlPath)
         }
     }
     fclose(f);
-    printf("obj: loaded MTL with %d materials\n", m->numMaterials);
+    conLogf("obj: loaded MTL with %d materials\n", m->numMaterials);
 }
 
 static int objLoad(ObjMesh *m, const char *filename)
@@ -336,12 +336,12 @@ static void objBuildSectors(ObjMesh *m)
         }
     }
 
-    printf("obj: built %d sectors\n", m->numSectors);
+    conLogf("obj: built %d sectors\n", m->numSectors);
     for (int i = 0; i < m->numSectors; i++) {
         Sector *s = &m->sectors[i];
         const char *name = (s->materialId >= 0 && s->materialId < m->numMaterials)
                            ? m->materials[s->materialId].name : "(none)";
-        printf("  sector %d: material '%s' (%d tris)\n", i, name, s->triCount);
+        conLogf("  sector %d: material '%s' (%d tris)\n", i, name, s->triCount);
     }
 }
 

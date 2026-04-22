@@ -92,7 +92,7 @@ static void navInit(NavGraph *g, EntityList *el, PhysWorld *pw)
     }
 
     if (g->numNodes == 0) {
-        printf("nav: no waypoints placed\n");
+        conLogf("nav: no waypoints placed\n");
         return;
     }
 
@@ -109,7 +109,7 @@ static void navInit(NavGraph *g, EntityList *el, PhysWorld *pw)
     }
     g->numEdges = edgeCount;
 
-    printf("nav: %d nodes, %d directed edges (%d undirected) built\n",
+    conLogf("nav: %d nodes, %d directed edges (%d undirected) built\n",
            g->numNodes, edgeCount, edgeCount / 2);
 }
 

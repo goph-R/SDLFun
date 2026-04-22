@@ -12,6 +12,14 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/* Forward-declare conLogf so every engine header included below can call
+   it before console.h (which needs ui.h + texture.h for conRender) is
+   parsed. Same-TU static forward decl + later static definition is
+   valid C/C++ — all the module headers compile as part of main.cpp's
+   single translation unit. */
+static void conLogf(const char *fmt, ...);
+
+#include "ui.h"
 #include "sound.h"
 #include "obj_loader.h"
 #include "texture.h"
@@ -21,7 +29,7 @@
 #include "flashlight.h"
 #include "physics.h"
 #include "nav.h"
-#include "ui.h"
+#include "console.h"
 #include "script.h"
 #include "game.h"
 #include "menu.h"
@@ -81,16 +89,16 @@ static void initMultitexture(void)
             SDL_GL_GetProcAddress("glMultiTexCoord2fARB");
         if (p_MT_ActiveTexture && p_MT_MultiTexCoord2f) {
             hasMultitexture = 1;
-            printf("Multitexture: supported\n");
+            conLogf("Multitexture: supported\n");
         }
     }
 #else
     /* Modern Linux GL always has multitexture */
     hasMultitexture = 1;
-    printf("Multitexture: supported\n");
+    conLogf("Multitexture: supported\n");
 #endif
     if (!hasMultitexture) {
-        printf("Multitexture: not available (lightmaps disabled)\n");
+        conLogf("Multitexture: not available (lightmaps disabled)\n");
     }
 }
 
@@ -114,10 +122,10 @@ static void saveDesktopRefreshHz(void)
     dm.dmSize = sizeof(dm);
     if (EnumDisplaySettings(NULL, ENUM_REGISTRY_SETTINGS, &dm)) {
         g_savedDesktopHz = dm.dmDisplayFrequency;
-        printf("Display: desktop refresh rate is %lu Hz\n",
+        conLogf("Display: desktop refresh rate is %lu Hz\n",
                (unsigned long)g_savedDesktopHz);
     } else {
-        fprintf(stderr, "Display: EnumDisplaySettings failed\n");
+        conLogf("Display: EnumDisplaySettings failed\n");
     }
 }
 
@@ -138,11 +146,10 @@ static void applyFullscreenRefreshHz(int width, int height)
 
     LONG rc = ChangeDisplaySettingsEx(NULL, &dm, NULL, CDS_FULLSCREEN, NULL);
     if (rc == DISP_CHANGE_SUCCESSFUL) {
-        printf("Display: refresh set to %lu Hz (fullscreen %dx%d)\n",
+        conLogf("Display: refresh set to %lu Hz (fullscreen %dx%d)\n",
                (unsigned long)g_savedDesktopHz, width, height);
     } else {
-        fprintf(stderr,
-                "Display: could not force %lu Hz at %dx%d (rc=%ld); "
+        conLogf("Display: could not force %lu Hz at %dx%d (rc=%ld); "
                 "staying at SDL's default rate\n",
                 (unsigned long)g_savedDesktopHz, width, height, (long)rc);
     }
@@ -594,7 +601,7 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
                decoration). Press B to see the wireframe. */
             static int lastLoggedEnt = -1;
             if (lastLoggedEnt != i) {
-                printf("door: '%s' blocked (sweep hit — collider overlapping "
+                conLogf("door: '%s' blocked (sweep hit — collider overlapping "
                        "world geometry?)\n", e->name);
                 lastLoggedEnt = i;
             }
@@ -626,7 +633,7 @@ int main(int argc, char *argv[])
     saveDesktopRefreshHz();
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        conLogf("SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
 
@@ -642,7 +649,7 @@ int main(int argc, char *argv[])
     }
     if (SCREEN_W < 320) SCREEN_W = 320;
     if (SCREEN_H < 240) SCREEN_H = 240;
-    printf("Resolution: %dx%d%s (V-FOV %.1f deg for %d deg H-FOV)\n",
+    conLogf("Resolution: %dx%d%s (V-FOV %.1f deg for %d deg H-FOV)\n",
            SCREEN_W, SCREEN_H, fullscreen ? " fullscreen" : "",
            computeVFov(), (int)H_FOV_DEG);
 
@@ -668,7 +675,7 @@ int main(int argc, char *argv[])
     if (fullscreen) videoFlags |= SDL_FULLSCREEN;
     SDL_Surface *screen = SDL_SetVideoMode(SCREEN_W, SCREEN_H, 32, videoFlags);
     if (!screen) {
-        fprintf(stderr, "SDL_SetVideoMode failed: %s\n", SDL_GetError());
+        conLogf("SDL_SetVideoMode failed: %s\n", SDL_GetError());
         sndShutdown(&snd);
         SDL_Quit();
         return 1;
@@ -676,6 +683,10 @@ int main(int argc, char *argv[])
 
     /* Re-apply the desktop refresh rate on top of SDL's fullscreen mode. */
     if (fullscreen) applyFullscreenRefreshHz(SCREEN_W, SCREEN_H);
+
+    /* Enable translated Unicode characters on KEYDOWN events so the dev
+       console can read typed characters via event.key.keysym.unicode. */
+    SDL_EnableUNICODE(1);
 
     SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + OpenAL", NULL);
     SDL_WM_GrabInput(SDL_GRAB_ON);
@@ -710,6 +721,13 @@ int main(int argc, char *argv[])
     UiState ui;
     uiInit(&ui, SCREEN_W, SCREEN_H);
 
+    /* Dev console — rolls down with backtick in-game. Bound globally up
+       front so every conLogf call after this point (including asset /
+       script loading chatter below) also lands in the scrollback. */
+    Console con;
+    conInit(&con);
+    conBind(&con);
+
     /* App-level Lua runtime + asset registry. Loaded once before any game
        boots so .ent files can resolve model/texture logical names and
        sound/font tables can populate their libraries. scriptInit takes
@@ -720,6 +738,7 @@ int main(int argc, char *argv[])
     ScriptSystem script;
     scriptInit(&script, &ui, &snd, &sndLib, NULL, &assetReg);
     scriptLoadAssets(&script, "assets.lua");
+    scriptInstallConsolePrint(&script);  /* override Lua print → console */
 
     /* App state machine. Starts in MODE_MENU with the MainMenu pushed and
        no Game yet — New Game triggers the first gameInit. */
@@ -761,34 +780,72 @@ int main(int argc, char *argv[])
             game.fpsFrames = 0;
         }
 
+        conUpdate(&con, dt);
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 app.running = 0;
                 break;
             }
             if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    /* Back to the menu — game state is preserved so the
-                       player can Continue. Next frame takes the MODE_MENU
-                       branch; break out of the event queue so remaining
-                       in-game events don't fire after the transition. */
+                SDLKey sym = event.key.keysym.sym;
+                Uint16 uni = event.key.keysym.unicode;
+
+                /* Backtick: toggle the console, regardless of prior state.
+                   Also flips mouse grab: open → free cursor so typing
+                   without mouselook is comfortable; close → re-grab for
+                   FPS controls. Don't let the backtick reach conText
+                   (would otherwise be appended to the command buffer). */
+                if (sym == SDLK_BACKQUOTE) {
+                    conToggle(&con);
+                    if (con.open) {
+                        SDL_WM_GrabInput(SDL_GRAB_OFF);
+                        SDL_ShowCursor(SDL_ENABLE);
+                    } else {
+                        SDL_WM_GrabInput(SDL_GRAB_ON);
+                        SDL_ShowCursor(SDL_DISABLE);
+                    }
+                    continue;
+                }
+
+                /* Esc always goes to the menu — same keybinding whether or
+                   not the console is open. Close the console on the way
+                   so the next menu visit is clean. */
+                if (sym == SDLK_ESCAPE) {
+                    conClose(&con);
                     app.mode = MODE_MENU;
                     appEnterMenu(&app);
                     SDL_WM_GrabInput(SDL_GRAB_OFF);
                     SDL_ShowCursor(SDL_ENABLE);
                     break;
                 }
+
+                /* Console capturing keyboard — route the key + printable
+                   unicode to it instead of the game-action handlers. */
+                if (conCapturesInput(&con)) {
+                    int kr = conKey(&con, sym);
+                    if (kr == CON_KEY_EXEC) {
+                        conExecute(&con, &script);
+                        con.cmdLen = 0;
+                        con.cmd[0] = '\0';
+                    } else if (kr == CON_KEY_NONE) {
+                        /* Printable character → append to the command. */
+                        if (uni >= 0x20 && uni <= 0x7E) conText(&con, uni);
+                    }
+                    continue;
+                }
+
                 if (event.key.keysym.sym == SDLK_f) {
                     game.flashlightOn = !game.flashlightOn;
-                    printf("Flashlight: %s\n", game.flashlightOn ? "ON" : "OFF");
+                    conLogf("Flashlight: %s\n", game.flashlightOn ? "ON" : "OFF");
                 }
                 if (event.key.keysym.sym == SDLK_b) {
                     game.debugColliders = !game.debugColliders;
-                    printf("Collider wireframes: %s\n", game.debugColliders ? "ON" : "OFF");
+                    conLogf("Collider wireframes: %s\n", game.debugColliders ? "ON" : "OFF");
                 }
                 if (event.key.keysym.sym == SDLK_n) {
                     game.debugNav = !game.debugNav;
-                    printf("Nav graph: %s (%d node%s)\n",
+                    conLogf("Nav graph: %s (%d node%s)\n",
                            game.debugNav ? "ON" : "OFF",
                            game.nav.numNodes, game.nav.numNodes == 1 ? "" : "s");
                     /* One-shot A* test from player to the last waypoint so the
@@ -801,16 +858,16 @@ int main(int argc, char *argv[])
                         int path[NAV_MAX_NODES];
                         int len = navFindPath(&game.nav, &game.phys, from, to,
                                               path, NAV_MAX_NODES);
-                        printf("nav: test path (player -> node %d): %d step(s)",
+                        conLogf("nav: test path (player -> node %d): %d step(s)",
                                game.nav.numNodes - 1, len);
-                        for (int i = 0; i < len; i++) printf(" %d", path[i]);
-                        printf("\n");
+                        for (int i = 0; i < len; i++) conLogf(" %d", path[i]);
+                        conLogf("\n");
                     }
                 }
                 if (event.key.keysym.sym == SDLK_p) {
                     float _px, _py, _pz;
                     physGetPlayerPos(&game.phys, &_px, &_py, &_pz);
-                    printf("player pos: X=%.3f Y=%.3f Z=%.3f  yaw=%.1f pitch=%.1f\n",
+                    conLogf("player pos: X=%.3f Y=%.3f Z=%.3f  yaw=%.1f pitch=%.1f\n",
                            _px, _py, _pz, game.yaw, game.pitch);
                 }
                 if (event.key.keysym.sym == SDLK_SPACE) {
@@ -821,12 +878,13 @@ int main(int argc, char *argv[])
                 }
             }
             if (event.type == SDL_MOUSEBUTTONDOWN) {
-                if (event.button.button == SDL_BUTTON_LEFT) {
+                if (event.button.button == SDL_BUTTON_LEFT &&
+                    !conCapturesInput(&con)) {
                     game.gunFlashTimer = 4;
                     sndPlay(&snd, sndLibFind(&sndLib, "fire"));
                 }
             }
-            if (event.type == SDL_MOUSEMOTION) {
+            if (event.type == SDL_MOUSEMOTION && !conCapturesInput(&con)) {
                 game.yaw   -= event.motion.xrel * 0.15f;
                 game.pitch -= event.motion.yrel * 0.15f;
                 if (game.pitch > 89.0f) game.pitch = 89.0f;
@@ -841,12 +899,17 @@ int main(int argc, char *argv[])
         float rightX = cosf(game.yaw * (float)M_PI / 180.0f);
         float rightZ = -sinf(game.yaw * (float)M_PI / 180.0f);
 
-        /* Desired (wish) velocity in m/s from input. */
+        /* Desired (wish) velocity in m/s from input. While the console is
+           open all player input (keyboard + mouse) is paused so typing
+           doesn't double as gameplay; simulation (physics, entities,
+           doors) continues to tick. */
         float wishX = 0, wishZ = 0;
-        if (keys[SDLK_w]) { wishX += forwardX; wishZ += forwardZ; }
-        if (keys[SDLK_s]) { wishX -= forwardX; wishZ -= forwardZ; }
-        if (keys[SDLK_a]) { wishX -= rightX;   wishZ -= rightZ; }
-        if (keys[SDLK_d]) { wishX += rightX;   wishZ += rightZ; }
+        if (!conCapturesInput(&con)) {
+            if (keys[SDLK_w]) { wishX += forwardX; wishZ += forwardZ; }
+            if (keys[SDLK_s]) { wishX -= forwardX; wishZ -= forwardZ; }
+            if (keys[SDLK_a]) { wishX -= rightX;   wishZ -= rightZ; }
+            if (keys[SDLK_d]) { wishX += rightX;   wishZ += rightZ; }
+        }
         float wishLen = sqrtf(wishX * wishX + wishZ * wishZ);
         if (wishLen > 0.001f) {
             wishX = (wishX / wishLen) * moveSpeed;
@@ -977,8 +1040,8 @@ int main(int argc, char *argv[])
            Coordinates are virtual (1080-tall canvas, origin at center). */
         uiBegin(&ui);
         {
-            const float pad = 30.0f;
-            const float barW = 400.0f, barH = 40.0f;
+            const float pad = 15.0f;
+            const float barW = 200.0f, barH = 22.0f;
             const float halfW = uiGetWidth(&ui)  * 0.5f;
             const float halfH = uiGetHeight(&ui) * 0.5f;
             UiColor white = uiRgb(1, 1, 1);
@@ -986,17 +1049,17 @@ int main(int argc, char *argv[])
             UiColor amber = uiRgb(1.0f, 1.0f, 0.2f);
 
             /* Health: bottom-left */
-            uiText(&ui, -halfW + pad, halfH - pad - barH - 34,
+            uiText(&ui, -halfW + pad, halfH - pad - barH - 17,
                    white, "HEALTH", 2.5f);
             uiBar(uiRectMake(-halfW + pad, halfH - pad - barH, barW, barH),
                   0.87f, red);
-            uiText(&ui, -halfW + pad + barW + 20, halfH - pad - barH + 4,
+            uiText(&ui, -halfW + pad + barW + 10, halfH - pad - barH + 2,
                    white, "87", 3.5f);
 
             /* Ammo: bottom-right */
             char ammo[32];
             snprintf(ammo, sizeof(ammo), "%d / %d", 24, 72);
-            uiText(&ui, halfW - pad, halfH - pad - 40, amber, ammo,
+            uiText(&ui, halfW - pad, halfH - pad - 20, amber, ammo,
                    4.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
 
             /* FPS: top-right */
@@ -1007,6 +1070,14 @@ int main(int argc, char *argv[])
 
             /* Transient script-driven message (ui_show_message from Lua). */
             uiDrawMessage(&ui);
+
+            /* Dev console — drawn last so it overlays the HUD. Resolve the
+               tiled background texture up here so console.h has no asset
+               registry / texture-cache dependency. */
+            const char *cbgPath = assetRegFindTexture(&assetReg, "dialog_bg");
+            GLuint conBgTex = cbgPath
+                ? texCacheGet(&app.menuTex, cbgPath, GL_REPEAT) : 0;
+            conRender(&con, &ui, conBgTex);
         }
         uiEnd(&ui);
         }  /* end MODE_GAME branch */
@@ -1025,7 +1096,7 @@ int main(int argc, char *argv[])
                 }
                 if (!gameInit(&game, "assets/levels/test_level.obj",
                               "assets/levels/test_level.ent", &script, &assetReg)) {
-                    fprintf(stderr, "gameInit failed\n");
+                    conLogf("gameInit failed\n");
                     app.running = 0;
                 } else {
                     gameInited = 1;
