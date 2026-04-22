@@ -44,8 +44,9 @@ typedef enum {
 #define MENU_ACTION_BACK         5
 
 /* Dialog OK-confirm codes — what the dialog does when its OK is chosen. */
-#define DLG_CONFIRM_NONE 0
-#define DLG_CONFIRM_QUIT 1
+#define DLG_CONFIRM_NONE     0
+#define DLG_CONFIRM_QUIT     1
+#define DLG_CONFIRM_NEW_GAME 2
 
 /* Actions that bubble up to main.cpp for game-state side effects. Others
    are handled inside menu.h without touching app->pendingAction. */
@@ -257,32 +258,25 @@ static GLuint appGetMenuTex(AppState *app, const char *name, int wrapMode)
     return texCacheGet(&app->menuTex, path, wrapMode);
 }
 
-/* Draw menu_bg as a cover-fit quad (fills the whole virtual canvas, crops
-   on whichever axis has excess, keeps aspect ratio). If the texture isn't
-   loaded, draws a flat fallback color so the menu still shows. */
-static void menuDrawBackground(AppState *app)
+/* Draw a texture as a cover-fit quad (fills the whole virtual canvas,
+   crops on whichever axis has excess, keeps aspect ratio). If the texture
+   isn't loaded, draws a flat fallback color so something is still visible.
+   Assumes a 16:9 source aspect — the .bmp loader doesn't surface size
+   through the TexCache API, and the menu/loading art we ship is landscape. */
+static void menuDrawCoverBg(AppState *app, const char *name, UiColor fallback)
 {
     UiState *ui = app->ui;
     float vw = uiGetWidth(ui);
     float vh = uiGetHeight(ui);
     UiRect full = uiRectMake(-vw * 0.5f, -vh * 0.5f, vw, vh);
 
-    GLuint tex = appGetMenuTex(app, "menu_bg", GL_CLAMP_TO_EDGE);
-    if (!tex) {
-        uiQuad(full, uiRgb(0.08f, 0.08f, 0.16f));
-        return;
-    }
+    GLuint tex = appGetMenuTex(app, name, GL_CLAMP_TO_EDGE);
+    if (!tex) { uiQuad(full, fallback); return; }
 
-    /* Cover-fit: assume a 16:9 source aspect. (The .bmp loader we use in
-       texture.h doesn't surface width/height through the cache API, so
-       we treat menu_bg as a conventional 16:9 landscape asset.) Compute
-       the UV rect so the image fills the whole virtual canvas and crops
-       on the axis with excess. */
     float srcAspect = 16.0f / 9.0f;
     float dstAspect = vw / vh;
     float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
     if (dstAspect > srcAspect) {
-        /* Dest wider than source → crop top and bottom. */
         float visible = srcAspect / dstAspect;
         float crop = (1.0f - visible) * 0.5f;
         v0 = crop; v1 = 1.0f - crop;
@@ -302,6 +296,11 @@ static void menuDrawBackground(AppState *app)
         glTexCoord2f(u0, v1); glVertex2f(full.x,           full.y + full.h);
     glEnd();
     glDisable(GL_TEXTURE_2D);
+}
+
+static void menuDrawBackground(AppState *app)
+{
+    menuDrawCoverBg(app, "menu_bg", uiRgb(0.08f, 0.08f, 0.16f));
 }
 
 static void menuDrawLogo(AppState *app)
@@ -370,7 +369,15 @@ static void mainMenuKey(MainMenu *mm, SDLKey sym, AppState *app)
                 app->pendingAction = PENDING_CONTINUE;
                 break;
             case MENU_ACTION_NEW_GAME:
-                app->pendingAction = PENDING_NEW_GAME;
+                if (app->game) {
+                    /* Prior session exists — confirm before discarding. */
+                    Screen s = makeDialog("NEW GAME",
+                                          "Start a new game? Progress will be lost.",
+                                          DLG_CONFIRM_NEW_GAME);
+                    screenStackPush(&app->screens, &s);
+                } else {
+                    app->pendingAction = PENDING_NEW_GAME;
+                }
                 break;
             case MENU_ACTION_OPTIONS: {
                 Screen s = makeOptions(app->ui);
@@ -469,8 +476,9 @@ static UiRect dialogBtnRect(UiState *ui, int which /* 0=OK, 1=Cancel */)
 static void dialogFire(Dialog *d, AppState *app)
 {
     if (d->focused == 0) {
-        if (d->okConfirm == DLG_CONFIRM_QUIT) {
-            app->pendingAction = PENDING_QUIT;
+        switch (d->okConfirm) {
+            case DLG_CONFIRM_QUIT:     app->pendingAction = PENDING_QUIT;     break;
+            case DLG_CONFIRM_NEW_GAME: app->pendingAction = PENDING_NEW_GAME; break;
         }
     }
     /* Whether OK or Cancel, the dialog is dismissed. */
@@ -571,6 +579,34 @@ static void dialogRender(Dialog *d, AppState *app)
     bCn.rect = dialogBtnRect(ui, 1);
     menuDrawButton(ui, &bOk, d->focused == 0);
     menuDrawButton(ui, &bCn, d->focused == 1);
+}
+
+/* ---- One-shot loading splash ----
+ *
+ * Called from main.cpp right before a (synchronous) gameInit run, so the
+ * user sees something other than a frozen window while the level loads.
+ * Does its own clear + uiBegin/uiEnd + SwapBuffers since it's fired
+ * outside the regular frame loop's dispatch. No input handling — control
+ * returns to main.cpp immediately after the swap and gameInit blocks
+ * the thread until it finishes. */
+static void drawLoadingScreen(AppState *app)
+{
+    UiState *ui = app->ui;
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    uiBegin(ui);
+    menuDrawCoverBg(app, "loading_bg", uiRgb(0.04f, 0.03f, 0.08f));
+
+    float halfW = uiGetWidth(ui)  * 0.5f;
+    float halfH = uiGetHeight(ui) * 0.5f;
+    UiColor fg = uiRgba(1, 1, 1, 1);
+    uiText(ui, halfW - MENU_PADDING, halfH - MENU_PADDING,
+           fg, "LOADING", 5.0f,
+           UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "button_font");
+    uiEnd(ui);
+
+    SDL_GL_SwapBuffers();
 }
 
 /* ---- Screen dispatcher ---- */

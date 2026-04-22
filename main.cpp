@@ -1014,6 +1014,10 @@ int main(int argc, char *argv[])
         /* Process side-effect actions surfaced by the menu or game loop. */
         switch (app.pendingAction) {
             case PENDING_NEW_GAME:
+                /* Paint a single "LOADING" frame before gameInit blocks the
+                   thread, so the window doesn't sit on a stale menu frame
+                   (or black) while the level and physics come up. */
+                drawLoadingScreen(&app);
                 if (gameInited) {
                     gameFree(&game, &script);
                     gameInited = 0;

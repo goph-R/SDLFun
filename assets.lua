@@ -36,9 +36,10 @@ return {
         office    = "assets/textures/office.bmp",
         wood1     = "assets/textures/wood1.bmp",
         -- Menu/UI textures.
-        menu_bg   = "assets/textures/menu_bg.bmp",
-        dialog_bg = "assets/textures/dialog_bg.bmp",
-        logo      = "assets/textures/logo.tga",
+        menu_bg    = "assets/textures/menu_bg.bmp",
+        dialog_bg  = "assets/textures/dialog_bg.bmp",
+        logo       = "assets/textures/logo.tga",
+        loading_bg = "assets/textures/loading_bg.bmp",
     },
 
     -- BMFont (AngelCode) bitmap fonts. Each entry points at a .fnt text file;
