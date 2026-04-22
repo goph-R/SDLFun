@@ -23,6 +23,8 @@
 #include "nav.h"
 #include "ui.h"
 #include "script.h"
+#include "game.h"
+#include "menu.h"
 
 #define SAMPLE_RATE 44100
 
@@ -91,6 +93,64 @@ static void initMultitexture(void)
         printf("Multitexture: not available (lightmaps disabled)\n");
     }
 }
+
+/* ---- Windows refresh-rate preservation ----
+ *
+ * SDL 1.2's fullscreen path calls ChangeDisplaySettings without specifying
+ * a frequency, so the driver falls back to its per-mode default — which on
+ * Win9x/2000 is typically 60Hz regardless of what the user had configured.
+ * We sample the desktop's configured rate before SDL touches the display
+ * (via ENUM_REGISTRY_SETTINGS so we read the persisted rate rather than
+ * whatever happens to be active), then after SDL_SetVideoMode we re-apply
+ * that rate on top of SDL's chosen resolution. No-op on non-Win32. */
+#ifdef _WIN32
+#include <windows.h>
+static DWORD g_savedDesktopHz = 0;
+
+static void saveDesktopRefreshHz(void)
+{
+    DEVMODE dm;
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettings(NULL, ENUM_REGISTRY_SETTINGS, &dm)) {
+        g_savedDesktopHz = dm.dmDisplayFrequency;
+        printf("Display: desktop refresh rate is %lu Hz\n",
+               (unsigned long)g_savedDesktopHz);
+    } else {
+        fprintf(stderr, "Display: EnumDisplaySettings failed\n");
+    }
+}
+
+static void applyFullscreenRefreshHz(int width, int height)
+{
+    /* 0 = not queried yet, 1 = "default" hardware rate — skip in either case
+       (setting to 1 would force the driver back to the very thing we're
+       trying to override). */
+    if (g_savedDesktopHz <= 1) return;
+
+    DEVMODE dm;
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize             = sizeof(dm);
+    dm.dmPelsWidth        = width;
+    dm.dmPelsHeight       = height;
+    dm.dmDisplayFrequency = g_savedDesktopHz;
+    dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+
+    LONG rc = ChangeDisplaySettingsEx(NULL, &dm, NULL, CDS_FULLSCREEN, NULL);
+    if (rc == DISP_CHANGE_SUCCESSFUL) {
+        printf("Display: refresh set to %lu Hz (fullscreen %dx%d)\n",
+               (unsigned long)g_savedDesktopHz, width, height);
+    } else {
+        fprintf(stderr,
+                "Display: could not force %lu Hz at %dx%d (rc=%ld); "
+                "staying at SDL's default rate\n",
+                (unsigned long)g_savedDesktopHz, width, height, (long)rc);
+    }
+}
+#else
+static void saveDesktopRefreshHz(void) {}
+static void applyFullscreenRefreshHz(int, int) {}
+#endif
 
 /* ---- OpenGL helpers ---- */
 
@@ -560,6 +620,11 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Sample the configured desktop refresh rate BEFORE SDL touches the
+       display, so later we can reapply it over SDL's fullscreen mode
+       (which otherwise drops to the driver's 60Hz default on Win9x). */
+    saveDesktopRefreshHz();
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -609,6 +674,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    /* Re-apply the desktop refresh rate on top of SDL's fullscreen mode. */
+    if (fullscreen) applyFullscreenRefreshHz(SCREEN_W, SCREEN_H);
+
     SDL_WM_SetCaption("FPS Demo - SDL + OpenGL + Bullet + OpenAL", NULL);
     SDL_WM_GrabInput(SDL_GRAB_ON);
     SDL_ShowCursor(SDL_DISABLE);
@@ -642,251 +710,136 @@ int main(int argc, char *argv[])
     UiState ui;
     uiInit(&ui, SCREEN_W, SCREEN_H);
 
-    /* Texture cache (loads textures on demand) */
-    TexCache texCache;
-    texCacheInit(&texCache);
-
-    /* Load level */
-    ObjMesh level;
-    objInit(&level);
-    if (!objLoad(&level, "assets/levels/test_level.obj")) {
-        fprintf(stderr, "Failed to load assets/levels/test_level.obj\n");
-        sndShutdown(&snd);
-        SDL_Quit();
-        return 1;
-    }
-    printf("Level loaded: %d verts, %d texcoords, %d tris, %d materials\n",
-           level.numVerts, level.numTexcoords, level.numTris, level.numMaterials);
-
-    /* Heap-allocate the entity list (EntityList is ~4MB — 256 entities
-       with inline ObjMesh+IqmModel) before booting Lua, so the script
-       runtime can hold a borrowed pointer. */
-    EntityList *entities = (EntityList *)malloc(sizeof(EntityList));
-    entListInit(entities);
-
-    /* Boot the Lua runtime and load the asset manifest BEFORE entity load,
-       so .ent files can reference models/textures by their registered
-       logical names (resolved via AssetRegistry). on_start() still fires
-       below, after the game systems that its hooks expect are ready. */
+    /* App-level Lua runtime + asset registry. Loaded once before any game
+       boots so .ent files can resolve model/texture logical names and
+       sound/font tables can populate their libraries. scriptInit takes
+       NULL entities — gameInit rebinds script->entities for the current
+       session. */
     AssetRegistry assetReg;
     assetRegInit(&assetReg);
     ScriptSystem script;
-    scriptInit(&script, &ui, &snd, &sndLib, entities, &assetReg);
+    scriptInit(&script, &ui, &snd, &sndLib, NULL, &assetReg);
     scriptLoadAssets(&script, "assets.lua");
 
-    /* Load entities (before physics, to get player spawn position) */
-    entLoadFile(entities, "assets/levels/test_level.ent", &texCache, &assetReg);
+    /* App state machine. Starts in MODE_MENU with the MainMenu pushed and
+       no Game yet — New Game triggers the first gameInit. */
+    AppState app;
+    appInit(&app, SCREEN_W, SCREEN_H, &ui, &assetReg, &script, &snd, &sndLib);
 
-    float spawnX = 0.0f, spawnY = 2.0f, spawnZ = 0.0f;
-    if (entities->playerIndex >= 0) {
-        Entity *pe = &entities->entities[entities->playerIndex];
-        spawnX = pe->posX;
-        spawnY = pe->posY;
-        spawnZ = pe->posZ;
-    }
+    /* Game struct is allocated once on the stack; gameInited tracks
+       whether it currently holds an active session (so gameFree only
+       runs on one that was initialized). */
+    Game game;
+    int  gameInited = 0;
 
-    /* Init physics BEFORE building sectors (sorting changes triangle order) */
-    PhysWorld phys;
-    physInit(&phys);
-    physLoadLevel(&phys, &level);
-    physCreatePlayer(&phys, spawnX, spawnY, spawnZ);
+    /* Start in menu mode: release the mouse so the cursor can roam the UI. */
+    SDL_WM_GrabInput(SDL_GRAB_OFF);
+    SDL_ShowCursor(SDL_ENABLE);
 
-    /* Build sector batches (sorts triangles by material) */
-    objBuildSectors(&level);
-
-    /* Create colliders for decorations that opted in with
-       collide=box (AABB from mesh verts) or collide=trimesh (exact
-       btBvhTriangleMeshShape). AABB is fast but wrong for concave
-       props (desks with kneeholes, chairs with arm gaps) because
-       it fills in the hollow space. */
-    for (int i = 0; i < entities->count; i++) {
-        Entity *e = &entities->entities[i];
-        if (!e->collide || !e->hasMesh || e->mesh.numVerts == 0) continue;
-
-        float s = (e->scale > 0.0f) ? e->scale : 1.0f;
-
-        if (e->collide == 2) {
-            /* Trimesh: position is the entity origin; scale and rotation
-               are applied by the shape/body respectively. */
-            e->physBody = physAddStaticTrimesh(&phys, &e->mesh,
-                                               e->posX, e->posY, e->posZ,
-                                               e->rotY, s);
-            printf("entity: %s collider (trimesh %d tris at %.2f,%.2f,%.2f)\n",
-                   e->name, e->mesh.numTris, e->posX, e->posY, e->posZ);
-            continue;
-        }
-
-        /* Box: AABB of mesh verts, scaled, then rotated around entity origin. */
-        Vec3 *v0 = &e->mesh.verts[0];
-        float minX = v0->x, maxX = v0->x;
-        float minY = v0->y, maxY = v0->y;
-        float minZ = v0->z, maxZ = v0->z;
-        for (int k = 1; k < e->mesh.numVerts; k++) {
-            Vec3 *v = &e->mesh.verts[k];
-            if (v->x < minX) minX = v->x; else if (v->x > maxX) maxX = v->x;
-            if (v->y < minY) minY = v->y; else if (v->y > maxY) maxY = v->y;
-            if (v->z < minZ) minZ = v->z; else if (v->z > maxZ) maxZ = v->z;
-        }
-
-        float hx = (maxX - minX) * 0.5f * s;
-        float hy = (maxY - minY) * 0.5f * s;
-        float hz = (maxZ - minZ) * 0.5f * s;
-        float lcx = (minX + maxX) * 0.5f * s;
-        float lcy = (minY + maxY) * 0.5f * s;
-        float lcz = (minZ + maxZ) * 0.5f * s;
-
-        float rad = e->rotY * (float)M_PI / 180.0f;
-        float cs = cosf(rad), sn = sinf(rad);
-        float wx = e->posX + (cs * lcx + sn * lcz);
-        float wy = e->posY + lcy;
-        float wz = e->posZ + (-sn * lcx + cs * lcz);
-
-        if (e->type == ENT_DOOR) {
-            /* Door uses a kinematic rigid body so updateDoors() can reposition
-               it each frame and Bullet pushes the character controller out of
-               the way. Cache the local AABB center so we can recompute the
-               world collider transform cheaply when the entity moves. */
-            e->door.lcx = lcx;
-            e->door.lcy = lcy;
-            e->door.lcz = lcz;
-            e->physBody = physAddKinematicBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
-            printf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
-                   e->name, hx*2, hy*2, hz*2);
-        } else {
-            e->physBody = physAddStaticBox(&phys, wx, wy, wz, hx, hy, hz, e->rotY);
-            printf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
-                   e->name, hx*2, hy*2, hz*2, wx, wy, wz);
-        }
-    }
-
-    /* Init dynamic lightmap flashlight (HL1-style: modifies lightmap pixels on CPU) */
-    DynLightmap dynLm;
-    int hasDynLm = 0;
-    {
-        GLuint lmTex = texCacheGet(&texCache, "assets/levels/lightmap.bmp", GL_CLAMP_TO_EDGE);
-        if (lmTex) {
-            hasDynLm = dynLmInit(&dynLm, "assets/levels/lightmap.bmp", &level, lmTex);
-        }
-    }
-
-    /* Nav graph — pairs up waypoint entities with pairwise LOS. Empty
-       graph if no waypoints placed; that's fine. */
-    NavGraph nav;
-    navInit(&nav, entities, &phys);
-
-    /* Camera state */
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-    float moveSpeed = 6.0f;
-
-    int gunFlashTimer = 0;
-    int footstepTimer = 0;
-    int flashlightOn = 0;
-    int debugColliders = 0;
-    int debugNav = 0;
-
-    float fpsAccum = 0.0f;
-    int   fpsFrames = 0;
-    int   fpsDisplay = 0;
-
-    /* Game scripts run once all engine systems (UI, audio, entities,
-       physics) are ready. on_start() fires before the game loop so its
-       effects (HUD messages, door/switch activations) are visible on
-       frame 0. */
-    scriptRunFile(&script, "scripts/main.lua");
-    scriptCall(&script, "on_start");
+    const float moveSpeed = 6.0f;
 
     Uint32 lastTime = SDL_GetTicks();
-
     SDL_Event event;
-    int running = 1;
 
-    while (running) {
+    while (app.running) {
         Uint32 now = SDL_GetTicks();
         float dt = (now - lastTime) / 1000.0f;
         if (dt > 0.15f) dt = 0.15f;
         lastTime = now;
 
-        fpsAccum += dt;
-        fpsFrames++;
-        if (fpsAccum >= 0.5f) {
-            fpsDisplay = (int)(fpsFrames / fpsAccum + 0.5f);
-            fpsAccum = 0.0f;
-            fpsFrames = 0;
-        }
-
         uiUpdateMessage(&ui, dt);
+
+        if (app.mode == MODE_MENU) {
+            menuTick(&app, dt);
+        } else {
+        /* ---- MODE_GAME: gameplay event handling + simulation + render ---- */
+        game.fpsAccum += dt;
+        game.fpsFrames++;
+        if (game.fpsAccum >= 0.5f) {
+            game.fpsDisplay = (int)(game.fpsFrames / game.fpsAccum + 0.5f);
+            game.fpsAccum = 0.0f;
+            game.fpsFrames = 0;
+        }
 
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
-                running = 0;
+                app.running = 0;
+                break;
             }
             if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    running = 0;
+                    /* Back to the menu — game state is preserved so the
+                       player can Continue. Next frame takes the MODE_MENU
+                       branch; break out of the event queue so remaining
+                       in-game events don't fire after the transition. */
+                    app.mode = MODE_MENU;
+                    appEnterMenu(&app);
+                    SDL_WM_GrabInput(SDL_GRAB_OFF);
+                    SDL_ShowCursor(SDL_ENABLE);
+                    break;
                 }
                 if (event.key.keysym.sym == SDLK_f) {
-                    flashlightOn = !flashlightOn;
-                    printf("Flashlight: %s\n", flashlightOn ? "ON" : "OFF");
+                    game.flashlightOn = !game.flashlightOn;
+                    printf("Flashlight: %s\n", game.flashlightOn ? "ON" : "OFF");
                 }
                 if (event.key.keysym.sym == SDLK_b) {
-                    debugColliders = !debugColliders;
-                    printf("Collider wireframes: %s\n", debugColliders ? "ON" : "OFF");
+                    game.debugColliders = !game.debugColliders;
+                    printf("Collider wireframes: %s\n", game.debugColliders ? "ON" : "OFF");
                 }
                 if (event.key.keysym.sym == SDLK_n) {
-                    debugNav = !debugNav;
+                    game.debugNav = !game.debugNav;
                     printf("Nav graph: %s (%d node%s)\n",
-                           debugNav ? "ON" : "OFF",
-                           nav.numNodes, nav.numNodes == 1 ? "" : "s");
+                           game.debugNav ? "ON" : "OFF",
+                           game.nav.numNodes, game.nav.numNodes == 1 ? "" : "s");
                     /* One-shot A* test from player to the last waypoint so the
                        pathfinder has been exercised before any AI uses it. */
-                    if (debugNav && nav.numNodes >= 2) {
+                    if (game.debugNav && game.nav.numNodes >= 2) {
                         float px, py, pz;
-                        physGetPlayerPos(&phys, &px, &py, &pz);
+                        physGetPlayerPos(&game.phys, &px, &py, &pz);
                         Vec3 from; from.x = px; from.y = py; from.z = pz;
-                        Vec3 to = nav.nodes[nav.numNodes - 1];
+                        Vec3 to = game.nav.nodes[game.nav.numNodes - 1];
                         int path[NAV_MAX_NODES];
-                        int len = navFindPath(&nav, &phys, from, to,
+                        int len = navFindPath(&game.nav, &game.phys, from, to,
                                               path, NAV_MAX_NODES);
                         printf("nav: test path (player -> node %d): %d step(s)",
-                               nav.numNodes - 1, len);
+                               game.nav.numNodes - 1, len);
                         for (int i = 0; i < len; i++) printf(" %d", path[i]);
                         printf("\n");
                     }
                 }
                 if (event.key.keysym.sym == SDLK_p) {
                     float _px, _py, _pz;
-                    physGetPlayerPos(&phys, &_px, &_py, &_pz);
+                    physGetPlayerPos(&game.phys, &_px, &_py, &_pz);
                     printf("player pos: X=%.3f Y=%.3f Z=%.3f  yaw=%.1f pitch=%.1f\n",
-                           _px, _py, _pz, yaw, pitch);
+                           _px, _py, _pz, game.yaw, game.pitch);
                 }
                 if (event.key.keysym.sym == SDLK_SPACE) {
-                    if (phys.character->onGround()) {
-                        phys.character->jump();
+                    if (game.phys.character->onGround()) {
+                        game.phys.character->jump();
                         sndPlay(&snd, sndLibFind(&sndLib, "jump"));
                     }
                 }
             }
             if (event.type == SDL_MOUSEBUTTONDOWN) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
-                    gunFlashTimer = 4;
+                    game.gunFlashTimer = 4;
                     sndPlay(&snd, sndLibFind(&sndLib, "fire"));
                 }
             }
             if (event.type == SDL_MOUSEMOTION) {
-                yaw   -= event.motion.xrel * 0.15f;
-                pitch -= event.motion.yrel * 0.15f;
-                if (pitch > 89.0f) pitch = 89.0f;
-                if (pitch < -89.0f) pitch = -89.0f;
+                game.yaw   -= event.motion.xrel * 0.15f;
+                game.pitch -= event.motion.yrel * 0.15f;
+                if (game.pitch > 89.0f) game.pitch = 89.0f;
+                if (game.pitch < -89.0f) game.pitch = -89.0f;
             }
         }
 
         /* WASD movement */
         Uint8 *keys = SDL_GetKeyState(NULL);
-        float forwardX = -sinf(yaw * (float)M_PI / 180.0f);
-        float forwardZ = -cosf(yaw * (float)M_PI / 180.0f);
-        float rightX = cosf(yaw * (float)M_PI / 180.0f);
-        float rightZ = -sinf(yaw * (float)M_PI / 180.0f);
+        float forwardX = -sinf(game.yaw * (float)M_PI / 180.0f);
+        float forwardZ = -cosf(game.yaw * (float)M_PI / 180.0f);
+        float rightX = cosf(game.yaw * (float)M_PI / 180.0f);
+        float rightZ = -sinf(game.yaw * (float)M_PI / 180.0f);
 
         /* Desired (wish) velocity in m/s from input. */
         float wishX = 0, wishZ = 0;
@@ -904,55 +857,54 @@ int main(int argc, char *argv[])
            wish velocity; friction applies when no input. Higher accel = more
            responsive; higher friction = shorter slide. Numbers roughly match
            GoldSrc defaults scaled to our 6 m/s max. */
-        static float velX = 0, velZ = 0;
         const float ACCEL    = 10.0f;   /* m/s²-ish pull toward wish velocity */
         const float FRICTION = 20.0f;   /* m/s²-ish slowdown when no input    */
         if (wishLen > 0.001f) {
-            velX += (wishX - velX) * ACCEL * dt;
-            velZ += (wishZ - velZ) * ACCEL * dt;
+            game.velX += (wishX - game.velX) * ACCEL * dt;
+            game.velZ += (wishZ - game.velZ) * ACCEL * dt;
         } else {
-            float speed = sqrtf(velX * velX + velZ * velZ);
+            float speed = sqrtf(game.velX * game.velX + game.velZ * game.velZ);
             if (speed > 0.001f) {
                 float drop = FRICTION * dt;
                 float newSpeed = speed - drop;
                 if (newSpeed < 0) newSpeed = 0;
-                velX *= newSpeed / speed;
-                velZ *= newSpeed / speed;
+                game.velX *= newSpeed / speed;
+                game.velZ *= newSpeed / speed;
             } else {
-                velX = 0; velZ = 0;
+                game.velX = 0; game.velZ = 0;
             }
         }
-        int isMoving = (velX * velX + velZ * velZ) > 0.04f;  /* > 0.2 m/s */
+        int isMoving = (game.velX * game.velX + game.velZ * game.velZ) > 0.04f;
 
         /* Convert velocity (m/s) to per-substep displacement for Bullet. */
         const float perStep = 1.0f / 120.0f;
-        phys.character->setWalkDirection(
-            btVector3(velX * perStep, 0, velZ * perStep));
+        game.phys.character->setWalkDirection(
+            btVector3(game.velX * perStep, 0, game.velZ * perStep));
 
-        if (isMoving && phys.character->onGround()) {
-            footstepTimer -= (int)(dt * 1000);
-            if (footstepTimer <= 0) {
+        if (isMoving && game.phys.character->onGround()) {
+            game.footstepTimer -= (int)(dt * 1000);
+            if (game.footstepTimer <= 0) {
                 sndPlay(&snd, sndLibFind(&sndLib, "step"));
-                footstepTimer = 400;
+                game.footstepTimer = 400;
             }
         } else {
-            footstepTimer = 0;
+            game.footstepTimer = 0;
         }
 
-        physStep(&phys, dt);
+        physStep(&game.phys, dt);
 
         float px, py, pz;
-        physGetPlayerPos(&phys, &px, &py, &pz);
+        physGetPlayerPos(&game.phys, &px, &py, &pz);
         /* Capsule center is 0.875m above the floor when grounded (halfHeight
            0.525 + radius 0.35), so +0.755 puts the camera at 1.63m — realistic
            eye height for a 1.75m-tall person. */
         float eyeY = py + 0.765f;
 
         float lookX = px + forwardX;
-        float lookY = eyeY + sinf(pitch * (float)M_PI / 180.0f);
+        float lookY = eyeY + sinf(game.pitch * (float)M_PI / 180.0f);
         float lookZ = pz + forwardZ;
 
-        if (gunFlashTimer > 0) gunFlashTimer--;
+        if (game.gunFlashTimer > 0) game.gunFlashTimer--;
 
         /* ---- Render ---- */
         glClearColor(0.4f, 0.6f, 0.8f, 1.0f);
@@ -969,7 +921,7 @@ int main(int argc, char *argv[])
            goes BEFORE glLookAt so matrix order is M = R * L (roll applied
            in view space, lookat transforms world→view first). */
         {
-            float strafeVel = velX * rightX + velZ * rightZ;
+            float strafeVel = game.velX * rightX + game.velZ * rightZ;
             const float ROLL_SPEED = 6.0f;    /* vel at which we hit max roll */
             const float MAX_ROLL   = 2.0f;    /* degrees */
             float roll = strafeVel / ROLL_SPEED * MAX_ROLL;
@@ -987,7 +939,7 @@ int main(int argc, char *argv[])
         glLightfv(GL_LIGHT0, GL_POSITION, lp);
 
         /* Flashlight (HL1-style: modify lightmap pixels on CPU, re-upload) */
-        if (flashlightOn && hasDynLm) {
+        if (game.flashlightOn && game.hasDynLm) {
             float dirX = lookX - px;
             float dirY = lookY - eyeY;
             float dirZ = lookZ - pz;
@@ -995,32 +947,30 @@ int main(int argc, char *argv[])
             if (dirLen > 0.0001f) { dirX /= dirLen; dirY /= dirLen; dirZ /= dirLen; }
 
             float hitX, hitY, hitZ;
-            if (physRaycast(&phys, px, eyeY, pz, dirX, dirY, dirZ, 30.0f,
+            if (physRaycast(&game.phys, px, eyeY, pz, dirX, dirY, dirZ, 30.0f,
                             &hitX, &hitY, &hitZ)) {
-                dynLmUpdate(&dynLm, hitX, hitY, hitZ,
-                            3.0f,           /* radius in meters */
-                            1.0f,           /* intensity */
-                            1.0f, 0.95f, 0.8f); /* warm white color */
+                dynLmUpdate(&game.dynLm, hitX, hitY, hitZ,
+                            3.0f, 1.0f, 1.0f, 0.95f, 0.8f);
             } else {
-                dynLmRestore(&dynLm);
+                dynLmRestore(&game.dynLm);
             }
-        } else if (hasDynLm) {
-            dynLmRestore(&dynLm);
+        } else if (game.hasDynLm) {
+            dynLmRestore(&game.dynLm);
         }
 
-        renderLevelSectored(&level, &texCache);
+        renderLevelSectored(&game.level, &game.texCache);
 
         /* Update and render entities */
-        entUpdate(entities, px, py, pz, dt);
-        updateDoors(entities, &phys, dt);
+        entUpdate(game.entities, px, py, pz, dt);
+        updateDoors(game.entities, &game.phys, dt);
         glEnable(GL_LIGHTING);
         glColor3f(1.0f, 1.0f, 1.0f);
-        entRender(entities);
+        entRender(game.entities);
 
-        if (debugColliders) physDebugDrawColliders(&phys);
-        if (debugNav) navDebugRender(&nav);
+        if (game.debugColliders) physDebugDrawColliders(&game.phys);
+        if (game.debugNav) navDebugRender(&game.nav);
 
-        renderGun(gunFlashTimer);
+        renderGun(game.gunFlashTimer);
         renderCrosshair();
 
         /* HUD — placeholder values until player/weapon state exists.
@@ -1051,7 +1001,7 @@ int main(int argc, char *argv[])
 
             /* FPS: top-right */
             char fps[32];
-            snprintf(fps, sizeof(fps), "%d FPS", fpsDisplay);
+            snprintf(fps, sizeof(fps), "%d FPS", game.fpsDisplay);
             uiText(&ui, halfW - pad, -halfH + pad, white, fps,
                    2.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
 
@@ -1059,27 +1009,52 @@ int main(int argc, char *argv[])
             uiDrawMessage(&ui);
         }
         uiEnd(&ui);
+        }  /* end MODE_GAME branch */
+
+        /* Process side-effect actions surfaced by the menu or game loop. */
+        switch (app.pendingAction) {
+            case PENDING_NEW_GAME:
+                if (gameInited) {
+                    gameFree(&game, &script);
+                    gameInited = 0;
+                    app.game = NULL;
+                }
+                if (!gameInit(&game, "assets/levels/test_level.obj",
+                              "assets/levels/test_level.ent", &script, &assetReg)) {
+                    fprintf(stderr, "gameInit failed\n");
+                    app.running = 0;
+                } else {
+                    gameInited = 1;
+                    app.game = &game;
+                    app.mode = MODE_GAME;
+                    screenStackClear(&app.screens);
+                    SDL_WM_GrabInput(SDL_GRAB_ON);
+                    SDL_ShowCursor(SDL_DISABLE);
+                }
+                break;
+            case PENDING_CONTINUE:
+                if (gameInited) {
+                    app.mode = MODE_GAME;
+                    screenStackClear(&app.screens);
+                    SDL_WM_GrabInput(SDL_GRAB_ON);
+                    SDL_ShowCursor(SDL_DISABLE);
+                }
+                break;
+            case PENDING_QUIT:
+                app.running = 0;
+                break;
+        }
+        app.pendingAction = PENDING_NONE;
 
         SDL_GL_SwapBuffers();
         SDL_Delay(1);
     }
 
     /* Cleanup */
+    if (gameInited) gameFree(&game, &script);
+    appShutdown(&app);
     scriptShutdown(&script);
     uiShutdown(&ui);
-    if (hasDynLm) dynLmFree(&dynLm);
-    for (int i = 0; i < entities->count; i++) {
-        Entity *e = &entities->entities[i];
-        if (!e->physBody) continue;
-        if (e->collide == 2) physRemoveStaticTrimesh(&phys, e->physBody);
-        else physRemoveStaticBox(&phys, e->physBody);
-        e->physBody = NULL;
-    }
-    entListFree(entities);
-    free(entities);
-    texCacheFree(&texCache);
-    physCleanup(&phys);
-    objFree(&level);
 
     sndLibShutdown(&sndLib);
     sndShutdown(&snd);

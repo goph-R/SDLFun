@@ -33,8 +33,12 @@ return {
     },
 
     textures = {
-        office = "assets/textures/office.bmp",
-        wood1  = "assets/textures/wood1.bmp",
+        office    = "assets/textures/office.bmp",
+        wood1     = "assets/textures/wood1.bmp",
+        -- Menu/UI textures.
+        menu_bg   = "assets/textures/menu_bg.bmp",
+        dialog_bg = "assets/textures/dialog_bg.bmp",
+        logo      = "assets/textures/logo.tga",
     },
 
     -- BMFont (AngelCode) bitmap fonts. Each entry points at a .fnt text file;
@@ -42,10 +46,18 @@ return {
     -- and per-glyph metrics. "default" is the font used when a uiText call
     -- passes no explicit font name — alias it to whichever font you want as
     -- the HUD baseline.
+    --
+    -- Loading the same .fnt under multiple logical names (e.g. button_font /
+    -- orbitron_small) is cheap: uiFontLoad deduplicates by path and shares
+    -- the atlas texture + glyph table between entries.
     fonts = {
-        default        = "assets/fonts/orbitron_small.fnt",
-        orbitron       = "assets/fonts/orbitron.fnt",
-        orbitron_small = "assets/fonts/orbitron_small.fnt",
+        default         = "assets/fonts/orbitron_small.fnt",
+        orbitron        = "assets/fonts/orbitron.fnt",
+        orbitron_small  = "assets/fonts/orbitron_small.fnt",
+        -- Menu-system aliases (same .fnt files, different logical names).
+        button_font     = "assets/fonts/orbitron_small.fnt",
+        dialog_title    = "assets/fonts/orbitron.fnt",
+        menu_title_font = "assets/fonts/orbitron.fnt",
     },
 
     levels = {

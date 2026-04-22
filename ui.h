@@ -187,11 +187,13 @@ struct UiGlyph {
 
 struct UiFont {
     char    name[UI_FONT_NAME_MAX];
+    char    sourcePath[UI_FONT_PATH_MAX]; /* .fnt path — used for dedupe */
     GLuint  tex;
     int     atlasW, atlasH;
     int     lineHeight;
     int     base;
     UiGlyph glyphs[UI_FONT_GLYPH_MAX];
+    int     ownsTex;   /* 1 → this entry deletes `tex` at shutdown; 0 → alias */
 };
 
 struct UiFontLib {
@@ -242,6 +244,25 @@ struct UiState {
 static float uiGetWidth(UiState *ui)  { return ui->virtualW; }
 static float uiGetHeight(UiState *ui) { return ui->virtualH; }
 
+/* Convert a pixel-space mouse position (SDL reports top-left origin,
+   Y-down) to the virtual canvas used by uiBegin/uiText. Virtual origin
+   is the screen center with Y-down, same handedness as the ortho set in
+   uiBegin. Safe to call even when GL ortho isn't currently active —
+   it's a pure coordinate transform on UiState's cached dimensions. */
+static void uiMouseToVirtual(UiState *ui, int px, int py, float *vx, float *vy)
+{
+    if (ui->screenW <= 0 || ui->screenH <= 0) { *vx = 0; *vy = 0; return; }
+    float u = (float)px / (float)ui->screenW;
+    float v = (float)py / (float)ui->screenH;
+    *vx = (u - 0.5f) * ui->virtualW;
+    *vy = (v - 0.5f) * ui->virtualH;
+}
+
+static int uiRectContains(UiRect r, float x, float y)
+{
+    return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+}
+
 static void uiInit(UiState *ui, int screenW, int screenH)
 {
     memset(ui, 0, sizeof(*ui));
@@ -287,7 +308,8 @@ static void uiInit(UiState *ui, int screenW, int screenH)
 static void uiShutdown(UiState *ui)
 {
     for (int i = 0; i < ui->fonts.count; i++) {
-        if (ui->fonts.fonts[i].tex) glDeleteTextures(1, &ui->fonts.fonts[i].tex);
+        UiFont *f = &ui->fonts.fonts[i];
+        if (f->ownsTex && f->tex) glDeleteTextures(1, &f->tex);
     }
     ui->fonts.count = 0;
     glDeleteTextures(1, &ui->fontTex);
@@ -396,6 +418,24 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
         fprintf(stderr, "ui: font library full, cannot load '%s'\n", name);
         return 0;
     }
+
+    /* Dedupe: if the same .fnt was already loaded under a different name,
+       create an alias entry that shares the GL texture and glyph table. */
+    for (int i = 0; i < lib->count; i++) {
+        if (strcmp(lib->fonts[i].sourcePath, fntPath) == 0) {
+            UiFont *src = &lib->fonts[i];
+            UiFont *dst = &lib->fonts[lib->count];
+            memcpy(dst, src, sizeof(*dst));
+            strncpy(dst->name, name, UI_FONT_NAME_MAX - 1);
+            dst->name[UI_FONT_NAME_MAX - 1] = '\0';
+            dst->ownsTex = 0;
+            lib->count++;
+            printf("ui: font '%s' aliased to '%s' (%s)\n",
+                   name, src->name, fntPath);
+            return 1;
+        }
+    }
+
     FILE *f = fopen(fntPath, "rb");
     if (!f) {
         fprintf(stderr, "ui: cannot open .fnt %s\n", fntPath);
@@ -405,6 +445,8 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
     UiFont *font = &lib->fonts[lib->count];
     memset(font, 0, sizeof(*font));
     strncpy(font->name, name, UI_FONT_NAME_MAX - 1);
+    strncpy(font->sourcePath, fntPath, UI_FONT_PATH_MAX - 1);
+    font->ownsTex = 1;
 
     char atlasFile[128];
     atlasFile[0] = '\0';
