@@ -322,63 +322,16 @@ static void uiShutdown(UiState *ui)
 /* ---- BMFont loading ----
  *
  * uiFontLoad parses a .fnt text file (AngelCode/fontbm output), uploads the
- * referenced atlas TGA as an OpenGL texture, and adds the result to the
+ * referenced atlas PNG as an OpenGL texture, and adds the result to the
  * library keyed by `name`. The texture path is resolved relative to the
  * .fnt's directory (the .fnt stores only the filename). */
 
-/* Uncompressed 32-bit RGBA TGA loader (BMFont atlas format). Returns 0 on
-   failure. Kept local to ui.h so the font system has no dependency on
-   texture.h — font atlases need the alpha channel that texture.h strips. */
-static GLuint uiLoadTGA32(const char *path)
+/* Font atlas loader. Wraps the shared PNG loader and forces RGBA so the
+   glyph alpha mask survives. main.cpp includes texture.h before ui.h so
+   loadTextureExA is visible here. */
+static GLuint uiLoadFontAtlas(const char *path)
 {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        conLogf("ui: cannot open font atlas %s\n", path);
-        return 0;
-    }
-    unsigned char hdr[18];
-    if (fread(hdr, 1, 18, f) != 18) { fclose(f); return 0; }
-    if (hdr[2] != 2 || hdr[16] != 32) {
-        conLogf("ui: %s must be uncompressed 32-bit TGA\n", path);
-        fclose(f);
-        return 0;
-    }
-    int w = hdr[12] | (hdr[13] << 8);
-    int h = hdr[14] | (hdr[15] << 8);
-    if (hdr[0]) fseek(f, hdr[0], SEEK_CUR);
-
-    int dataSz = w * h * 4;
-    unsigned char *raw = (unsigned char *)malloc(dataSz);
-    fread(raw, 1, dataSz, f);
-    fclose(f);
-
-    /* TGA stores BGRA; flip to RGBA. Bottom-up unless the origin bit is set. */
-    int topDown = (hdr[17] & 0x20) != 0;
-    unsigned char *rgba = (unsigned char *)malloc(dataSz);
-    for (int y = 0; y < h; y++) {
-        int sy = topDown ? y : (h - 1 - y);
-        unsigned char *src = raw + sy * w * 4;
-        unsigned char *dst = rgba + y * w * 4;
-        for (int x = 0; x < w; x++) {
-            dst[x*4+0] = src[x*4+2];
-            dst[x*4+1] = src[x*4+1];
-            dst[x*4+2] = src[x*4+0];
-            dst[x*4+3] = src[x*4+3];
-        }
-    }
-    free(raw);
-
-    GLuint tex;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    free(rgba);
-    return tex;
+    return loadTextureExA(path, GL_CLAMP, 1);
 }
 
 /* Match "key=<int>" at a word boundary in `line` and parse the int. */
@@ -510,7 +463,7 @@ static int uiFontLoad(UiFontLib *lib, const char *name, const char *fntPath)
         atlasPath[UI_FONT_PATH_MAX - 1] = '\0';
     }
 
-    font->tex = uiLoadTGA32(atlasPath);
+    font->tex = uiLoadFontAtlas(atlasPath);
     if (!font->tex) return 0;
 
     lib->count++;

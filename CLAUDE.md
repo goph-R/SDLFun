@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SDLFun is a small FPS engine targeting the full span from **Windows 98** (Dev-C++ / MinGW 3.4, SDL 1.2, fixed-function OpenGL, OpenAL Soft 1.9.563) up to modern Linux/Windows. The "runs on a Pentium 4" constraint is deliberate and drives most architectural decisions — no C++11 features, no shaders, no modern GL, header-only modules, static-libgcc linking for the Win10 build.
 
+**Minimum GPU: GeForce 4 MX 440 32MB.** DX7-class, 2 TMUs, 32-bit color, GL 1.3 + `GL_ARB_multitexture` + `GL_ARB_texture_env_combine`, no programmable shaders, no dependent texture reads, no 3 TMUs. Render features must work within this envelope — if a technique wants a 3rd texture unit, split it into multiple passes instead.
+
 ## Build commands
 
 There are **four** independent build systems, each for a different target. They all compile `main.cpp` + Bullet, but differ in compiler/toolchain/include paths.
@@ -42,7 +44,7 @@ Windows-specific: SDL 1.2's fullscreen path drops the monitor's refresh rate to 
 The whole engine is `main.cpp` plus header-only modules with `static` functions. Include order in `main.cpp` matters — e.g. `entity.h` depends on `obj_loader.h`, `texture.h`, and `iqm.h`.
 
 - `obj_loader.h` — OBJ/MTL parser. Parses custom `# lm_map`, `# tile_scale`, `# tile_offset` comments from MTL. `ObjMesh` holds verts/normals/texcoords/tris plus up to 32 materials and 32 **sectors**. `objBuildSectors()` sorts triangles by material to produce one draw batch per material.
-- `texture.h` — 24/32-bit BMP and TGA loader, plus a `TexCache` keyed by filename so the same texture isn't uploaded twice. Wrap mode is a parameter — diffuse tiling textures use `GL_REPEAT`, lightmaps use `GL_CLAMP_TO_EDGE`.
+- `texture.h` — PNG loader (wraps `stb_image` from `vendor/stb/stb_image.h`; the `STB_IMAGE_IMPLEMENTATION` lives here, so any other module that needs `stbi_load` must be included after texture.h). `loadTextureExA(path, wrapMode, keepAlpha)` is the single entry point; `keepAlpha=1` uploads RGBA, `=0` uploads RGB. Paired with a `TexCache` keyed by `(path, wrapMode, keepAlpha)` so diffuse and alpha-test uploads of the same file can coexist. Wrap mode is a parameter — diffuse tiling textures use `GL_REPEAT`, lightmaps and UI use `GL_CLAMP_TO_EDGE`.
 - `iqm.h` — Inter-Quake Model loader with skeletal animation (bone matrix palette computed per frame, software-skinned on CPU because the target is fixed-function GL).
 - `entity.h` — flat array of `Entity` structs (tagged union by `EntityType`). `EntityList` is ~4MB (256 entities each with inline `ObjMesh` + `IqmModel`) and is heap-allocated from `main()` to avoid a stack blowup. `entLoadFile()` parses `assets/levels/test_level.ent`.
 - `physics.h` — Bullet world wrapper: static `btBvhTriangleMeshShape` for the level, `btKinematicCharacterController` for the player. `physStep()` includes an explicit ceiling-penetration raycast correction each frame — do not remove it; the character controller doesn't clamp correctly against tight ceilings on its own.

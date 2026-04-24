@@ -19,10 +19,10 @@
    single translation unit. */
 static void conLogf(const char *fmt, ...);
 
-#include "ui.h"
-#include "sound.h"
 #include "obj_loader.h"
 #include "texture.h"
+#include "ui.h"
+#include "sound.h"
 #include "iqm.h"
 #include "asset_registry.h"
 #include "entity.h"
@@ -330,8 +330,8 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
 {
     /* Backward compat: no sectors -> use legacy single-texture path */
     if (mesh->numSectors == 0) {
-        GLuint diffTex = texCacheGet(cache, "assets/levels/diffuse.bmp", GL_CLAMP_TO_EDGE);
-        GLuint lmTex  = texCacheGet(cache, "assets/levels/lightmap.bmp", GL_CLAMP_TO_EDGE);
+        GLuint diffTex = texCacheGet(cache, "assets/levels/diffuse.png", GL_CLAMP_TO_EDGE);
+        GLuint lmTex  = texCacheGet(cache, "assets/levels/lightmap.png", GL_CLAMP_TO_EDGE);
         renderLevel(mesh, diffTex, lmTex);
         return;
     }
@@ -342,10 +342,14 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
         GLuint diffTex = 0;
         GLuint lmTex = 0;
         float tileScale = 1.0f;
+        int alphaTest = 0;
+        float alphaRef = 0.5f;
 
         if (sec->materialId >= 0 && sec->materialId < mesh->numMaterials) {
             mat = &mesh->materials[sec->materialId];
-            diffTex = texCacheGet(cache, mat->diffusePath, GL_REPEAT);
+            alphaTest = mat->alphaTest;
+            alphaRef  = mat->alphaRef;
+            diffTex = texCacheGetA(cache, mat->diffusePath, GL_REPEAT, alphaTest);
             lmTex   = texCacheGet(cache, mat->lightmapPath, GL_CLAMP_TO_EDGE);
             tileScale = mat->tilingScale;
         }
@@ -354,6 +358,11 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
         float tileOffV = mat ? mat->tilingOffsetY : 0.0f;
         int hasDiffuse = (diffTex != 0);
         int hasLM = (lmTex != 0 && hasMultitexture && mesh->numTexcoords > 0);
+
+        if (alphaTest) {
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, alphaRef);
+        }
 
         /* Set up texture units */
         if (hasDiffuse) {
@@ -425,6 +434,9 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
         }
         if (hasDiffuse) {
             glDisable(GL_TEXTURE_2D);
+        }
+        if (alphaTest) {
+            glDisable(GL_ALPHA_TEST);
         }
     }
 }

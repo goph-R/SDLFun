@@ -23,6 +23,8 @@ struct Material {
     float tilingScale;        /* # tile_scale from MTL, default 1.0 */
     float tilingOffsetX;      /* # tile_offset from MTL, default 0.0 */
     float tilingOffsetY;
+    int alphaTest;            /* # alpha_test from MTL; 1 = cutout via GL_ALPHA_TEST */
+    float alphaRef;           /* threshold for GL_GREATER (0..1), default 0.5 */
 };
 
 struct Triangle {
@@ -198,10 +200,12 @@ static void objLoadMtl(ObjMesh *m, const char *mtlPath)
             m->materials[cur].tilingScale = 1.0f;
             m->materials[cur].tilingOffsetX = 0.0f;
             m->materials[cur].tilingOffsetY = 0.0f;
+            m->materials[cur].alphaTest = 0;
+            m->materials[cur].alphaRef = 0.5f;
             strncpy(m->materials[cur].name, line + 7, 63);
             m->materials[cur].name[63] = '\0';
-            /* Default lightmap name: <materialname>_lm.bmp */
-            snprintf(m->materials[cur].lightmapPath, 128, "%s_lm.bmp", line + 7);
+            /* Default lightmap name: <materialname>_lm.png */
+            snprintf(m->materials[cur].lightmapPath, 128, "%s_lm.png", line + 7);
         }
         else if (strncmp(line, "map_Kd ", 7) == 0 && cur >= 0) {
             strncpy(m->materials[cur].diffusePath, line + 7, 127);
@@ -220,6 +224,14 @@ static void objLoadMtl(ObjMesh *m, const char *mtlPath)
             sscanf(line + 14, "%f %f",
                    &m->materials[cur].tilingOffsetX,
                    &m->materials[cur].tilingOffsetY);
+        }
+        else if (strncmp(line, "# alpha_test", 12) == 0 && cur >= 0) {
+            m->materials[cur].alphaTest = 1;
+            /* Optional threshold argument: "# alpha_test 0.3" */
+            float th = 0.0f;
+            if (sscanf(line + 12, " %f", &th) == 1 && th > 0.0f && th < 1.0f) {
+                m->materials[cur].alphaRef = th;
+            }
         }
     }
     fclose(f);

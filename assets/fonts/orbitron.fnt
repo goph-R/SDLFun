@@ -1,6 +1,6 @@
 info face="Orbitron ExtraBold" size=40 bold=0 italic=0 charset="" unicode=1 stretchH=100 smooth=1 aa=1 padding=8,8,8,8 spacing=1,1 outline=0
 common lineHeight=40 base=32 scaleW=512 scaleH=512 pages=1 packed=0 alphaChnl=1 redChnl=0 greenChnl=0 blueChnl=0
-page id=0 file="orbitron_0.tga"
+page id=0 file="orbitron_0.png"
 chars count=163
 char id=32   x=362   y=459   width=19    height=17    xoffset=-9    yoffset=31    xadvance=10    page=0  chnl=15
 char id=33   x=146   y=393   width=22    height=39    xoffset=-7    yoffset=1     xadvance=7     page=0  chnl=15

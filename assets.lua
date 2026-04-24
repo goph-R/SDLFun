@@ -33,17 +33,17 @@ return {
     },
 
     textures = {
-        office    = "assets/textures/office.bmp",
-        wood1     = "assets/textures/wood1.bmp",
+        office    = "assets/textures/office.png",
+        wood1     = "assets/textures/wood1.png",
         -- Menu/UI textures.
-        menu_bg    = "assets/textures/menu_bg.bmp",
-        dialog_bg  = "assets/textures/dialog_bg.bmp",
-        logo       = "assets/textures/logo.tga",
-        loading_bg = "assets/textures/loading_bg.bmp",
+        menu_bg    = "assets/textures/menu_bg.png",
+        dialog_bg  = "assets/textures/dialog_bg.png",
+        logo       = "assets/textures/logo.png",
+        loading_bg = "assets/textures/loading_bg.png",
     },
 
     -- BMFont (AngelCode) bitmap fonts. Each entry points at a .fnt text file;
-    -- the .fnt carries the atlas filename (a 32-bit TGA in the same directory)
+    -- the .fnt carries the atlas filename (a 32-bit RGBA PNG in the same directory)
     -- and per-glyph metrics. "default" is the font used when a uiText call
     -- passes no explicit font name — alias it to whichever font you want as
     -- the HUD baseline.

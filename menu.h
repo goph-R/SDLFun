@@ -261,7 +261,7 @@ static GLuint appGetMenuTex(AppState *app, const char *name, int wrapMode)
 /* Draw a texture as a cover-fit quad (fills the whole virtual canvas,
    crops on whichever axis has excess, keeps aspect ratio). If the texture
    isn't loaded, draws a flat fallback color so something is still visible.
-   Assumes a 16:9 source aspect — the .bmp loader doesn't surface size
+   Assumes a 16:9 source aspect — the PNG loader doesn't surface size
    through the TexCache API, and the menu/loading art we ship is landscape. */
 static void menuDrawCoverBg(AppState *app, const char *name, UiColor fallback)
 {

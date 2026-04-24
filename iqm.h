@@ -431,8 +431,21 @@ static void iqmLoadTextures(IqmModel *mdl, const char *modelPath, TexCache *cach
     }
 
     for (int i = 0; i < mdl->numMeshes; i++) {
+        /* IQM stores the original material filename at export time, which
+           may carry a stale extension (.tga / .bmp) from before the asset
+           pipeline moved to PNG. Rewrite the extension so the lookup hits
+           the file that's actually on disk today. */
         char texPath[256];
         snprintf(texPath, 256, "%s%s", dir, mdl->meshes[i].materialName);
+        char *dot = strrchr(texPath, '.');
+        char *slash1 = strrchr(texPath, '/');
+        char *slash2 = strrchr(texPath, '\\');
+        char *slash = (slash1 > slash2) ? slash1 : slash2;
+        if (dot && dot > slash) {
+            strcpy(dot, ".png");
+        } else if ((int)strlen(texPath) < 252) {
+            strcat(texPath, ".png");
+        }
         mdl->meshes[i].texID = texCacheGet(cache, texPath, GL_CLAMP_TO_EDGE);
     }
 }

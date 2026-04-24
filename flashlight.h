@@ -169,50 +169,24 @@ static int dynLmInit(DynLightmap *dl, const char *lmPath, ObjMesh *mesh, GLuint 
 {
     memset(dl, 0, sizeof(DynLightmap));
 
-    /* Load the BMP to get raw pixel data */
-    FILE *f = fopen(lmPath, "rb");
-    if (!f) return 0;
-
-    BmpFileHeader fh;
-    BmpInfoHeader ih;
-    fread(&fh, sizeof(fh), 1, f);
-    fread(&ih, sizeof(ih), 1, f);
-
-    if (fh.type != 0x4D42 || (ih.bitCount != 24 && ih.bitCount != 32) || ih.compression != 0) {
-        fclose(f);
+    /* Decode the PNG to raw RGB. stb_image returns top-down 8-bit rows,
+       which is exactly the layout the flashlight needs. */
+    int w = 0, h = 0, srcCh = 0;
+    unsigned char *src = stbi_load(lmPath, &w, &h, &srcCh, 3);
+    if (!src) {
+        conLogf("flashlight: cannot load lightmap %s (%s)\n",
+                lmPath, stbi_failure_reason());
         return 0;
     }
+    dl->width = w;
+    dl->height = h;
 
-    dl->width = ih.width;
-    dl->height = ih.height < 0 ? -ih.height : ih.height;
-    int topDown = ih.height < 0;
-    int bpp = ih.bitCount / 8;
-    int rowSize = (dl->width * bpp + 3) & ~3;
-
-    unsigned char *rawData = (unsigned char *)malloc(rowSize * dl->height);
-    fseek(f, fh.offsetData, SEEK_SET);
-    fread(rawData, 1, rowSize * dl->height, f);
-    fclose(f);
-
-    /* Convert to RGB (same as loadBMP) */
     int pixelCount = dl->width * dl->height * 3;
     dl->bakedPixels = (unsigned char *)malloc(pixelCount);
-    dl->workPixels = (unsigned char *)malloc(pixelCount);
-
-    for (int y = 0; y < dl->height; y++) {
-        int srcY = topDown ? y : (dl->height - 1 - y);
-        unsigned char *src = rawData + srcY * rowSize;
-        unsigned char *dst = dl->bakedPixels + y * dl->width * 3;
-        for (int x = 0; x < dl->width; x++) {
-            dst[x * 3 + 0] = src[x * bpp + 2]; /* R */
-            dst[x * 3 + 1] = src[x * bpp + 1]; /* G */
-            dst[x * 3 + 2] = src[x * bpp + 0]; /* B */
-        }
-    }
-    free(rawData);
-
-    /* Copy baked to working */
-    memcpy(dl->workPixels, dl->bakedPixels, pixelCount);
+    dl->workPixels  = (unsigned char *)malloc(pixelCount);
+    memcpy(dl->bakedPixels, src, pixelCount);
+    memcpy(dl->workPixels,  src, pixelCount);
+    stbi_image_free(src);
 
     /* Allocate world position map */
     dl->worldPosMap = (float *)malloc(dl->width * dl->height * 3 * sizeof(float));

@@ -154,9 +154,9 @@ static int gameInit(Game *g,
     g->hasDynLm = 0;
     {
         GLuint lmTex = texCacheGet(&g->texCache,
-                                   "assets/levels/lightmap.bmp", GL_CLAMP_TO_EDGE);
+                                   "assets/levels/lightmap.png", GL_CLAMP_TO_EDGE);
         if (lmTex) {
-            g->hasDynLm = dynLmInit(&g->dynLm, "assets/levels/lightmap.bmp",
+            g->hasDynLm = dynLmInit(&g->dynLm, "assets/levels/lightmap.png",
                                     &g->level, lmTex);
         }
     }

@@ -6,187 +6,66 @@
 #include <cstdlib>
 #include <cstring>
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO_THREAD_SAFE
+#include "vendor/stb/stb_image.h"
+
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
 
-/* BMP file header structures (packed) */
-#pragma pack(push, 1)
-struct BmpFileHeader {
-    unsigned short type;
-    unsigned int size;
-    unsigned short reserved1;
-    unsigned short reserved2;
-    unsigned int offsetData;
-};
-
-struct BmpInfoHeader {
-    unsigned int size;
-    int width;
-    int height;
-    unsigned short planes;
-    unsigned short bitCount;
-    unsigned int compression;
-    unsigned int sizeImage;
-    int xPelsPerMeter;
-    int yPelsPerMeter;
-    unsigned int clrUsed;
-    unsigned int clrImportant;
-};
-#pragma pack(pop)
-
-/* Upload raw RGB data to an OpenGL texture with specified wrap mode */
-static GLuint uploadTexture(unsigned char *rgbData, int width, int height, int wrapMode)
+/* Upload raw RGB or RGBA pixel data to an OpenGL texture.
+   channels must be 3 (RGB) or 4 (RGBA). */
+static GLuint uploadTextureN(unsigned char *pixelData, int width, int height,
+                             int wrapMode, int channels)
 {
     GLuint texID;
+    GLenum fmt = (channels == 4) ? GL_RGBA : GL_RGB;
     glGenTextures(1, &texID);
     glBindTexture(GL_TEXTURE_2D, texID);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapMode);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapMode);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0,
-                 GL_RGB, GL_UNSIGNED_BYTE, rgbData);
+    glTexImage2D(GL_TEXTURE_2D, 0, fmt, width, height, 0,
+                 fmt, GL_UNSIGNED_BYTE, pixelData);
     return texID;
 }
 
-/* Load a 24-bit or 32-bit BMP file into an OpenGL texture.
+static GLuint uploadTexture(unsigned char *rgbData, int width, int height, int wrapMode)
+{
+    return uploadTextureN(rgbData, width, height, wrapMode, 3);
+}
+
+/* Load a PNG into an OpenGL texture. Only PNG is supported since the
+   asset pipeline migrated away from BMP/TGA. stb_image decodes directly
+   into the layout we need (top-down, 8-bit per channel).
+
+   keepAlpha=0 forces RGB (alpha dropped even if source has it).
+   keepAlpha=1 forces RGBA (alpha filled with 255 if source is RGB).
    Returns the GL texture ID, or 0 on failure. */
-static GLuint loadBMPEx(const char *filename, int wrapMode)
+static GLuint loadTextureExA(const char *filename, int wrapMode, int keepAlpha)
 {
-    FILE *f = fopen(filename, "rb");
-    if (!f) return 0;
-
-    BmpFileHeader fh;
-    BmpInfoHeader ih;
-    fread(&fh, sizeof(fh), 1, f);
-    fread(&ih, sizeof(ih), 1, f);
-
-    if (fh.type != 0x4D42) { /* 'BM' */
-        conLogf("texture: %s is not a BMP file\n", filename);
-        fclose(f);
+    int w = 0, h = 0, srcCh = 0;
+    int desired = keepAlpha ? 4 : 3;
+    unsigned char *pix = stbi_load(filename, &w, &h, &srcCh, desired);
+    if (!pix) {
+        conLogf("texture: cannot load %s (%s)\n", filename, stbi_failure_reason());
         return 0;
     }
-
-    if (ih.bitCount != 24 && ih.bitCount != 32) {
-        conLogf("texture: %s is %d-bit, need 24 or 32\n", filename, ih.bitCount);
-        fclose(f);
-        return 0;
-    }
-
-    if (ih.compression != 0) {
-        conLogf("texture: %s is compressed, not supported\n", filename);
-        fclose(f);
-        return 0;
-    }
-
-    int width = ih.width;
-    int height = ih.height < 0 ? -ih.height : ih.height;
-    int topDown = ih.height < 0;
-    int bpp = ih.bitCount / 8;
-    int rowSize = (width * bpp + 3) & ~3; /* rows are padded to 4 bytes */
-
-    unsigned char *rawData = (unsigned char *)malloc(rowSize * height);
-    fseek(f, fh.offsetData, SEEK_SET);
-    fread(rawData, 1, rowSize * height, f);
-    fclose(f);
-
-    /* Convert to RGB (OpenGL wants top-to-bottom, RGB order) */
-    unsigned char *rgbData = (unsigned char *)malloc(width * height * 3);
-
-    for (int y = 0; y < height; y++) {
-        int srcY = topDown ? y : (height - 1 - y);
-        unsigned char *src = rawData + srcY * rowSize;
-        unsigned char *dst = rgbData + y * width * 3;
-        for (int x = 0; x < width; x++) {
-            /* BMP stores BGR */
-            dst[x * 3 + 0] = src[x * bpp + 2]; /* R */
-            dst[x * 3 + 1] = src[x * bpp + 1]; /* G */
-            dst[x * 3 + 2] = src[x * bpp + 0]; /* B */
-        }
-    }
-    free(rawData);
-
-    GLuint texID = uploadTexture(rgbData, width, height, wrapMode);
-    free(rgbData);
-
-    conLogf("texture: loaded %s (%dx%d)\n", filename, width, height);
+    GLuint texID = uploadTextureN(pix, w, h, wrapMode, desired);
+    stbi_image_free(pix);
+    conLogf("texture: loaded %s (%dx%d, %d-ch)\n", filename, w, h, desired);
     return texID;
 }
 
-/* Load a TGA file (uncompressed, 24 or 32 bit) */
-static GLuint loadTGAEx(const char *filename, int wrapMode)
-{
-    FILE *f = fopen(filename, "rb");
-    if (!f) return 0;
-
-    unsigned char header[18];
-    fread(header, 1, 18, f);
-
-    int width = header[12] | (header[13] << 8);
-    int height = header[14] | (header[15] << 8);
-    int bpp = header[16] / 8;
-
-    if (bpp != 3 && bpp != 4) {
-        conLogf("texture: %s is %d-bit, need 24 or 32\n", filename, bpp * 8);
-        fclose(f);
-        return 0;
-    }
-
-    if (header[2] != 2) { /* uncompressed true-color only */
-        conLogf("texture: %s is not uncompressed true-color TGA\n", filename);
-        fclose(f);
-        return 0;
-    }
-
-    /* Skip image ID */
-    if (header[0] > 0) fseek(f, header[0], SEEK_CUR);
-
-    int dataSize = width * height * bpp;
-    unsigned char *rawData = (unsigned char *)malloc(dataSize);
-    fread(rawData, 1, dataSize, f);
-    fclose(f);
-
-    /* TGA is BGR(A), bottom-up by default. Convert to RGB. */
-    unsigned char *rgbData = (unsigned char *)malloc(width * height * 3);
-    int topDown = (header[17] & 0x20) != 0;
-
-    for (int y = 0; y < height; y++) {
-        int srcY = topDown ? y : (height - 1 - y);
-        unsigned char *src = rawData + srcY * width * bpp;
-        unsigned char *dst = rgbData + y * width * 3;
-        for (int x = 0; x < width; x++) {
-            dst[x * 3 + 0] = src[x * bpp + 2];
-            dst[x * 3 + 1] = src[x * bpp + 1];
-            dst[x * 3 + 2] = src[x * bpp + 0];
-        }
-    }
-    free(rawData);
-
-    GLuint texID = uploadTexture(rgbData, width, height, wrapMode);
-    free(rgbData);
-
-    conLogf("texture: loaded %s (%dx%d)\n", filename, width, height);
-    return texID;
-}
-
-/* Auto-detect format by extension, with wrap mode */
 static GLuint loadTextureEx(const char *filename, int wrapMode)
 {
-    int len = strlen(filename);
-    if (len > 4 && (strcmp(filename + len - 4, ".bmp") == 0 ||
-                    strcmp(filename + len - 4, ".BMP") == 0)) {
-        return loadBMPEx(filename, wrapMode);
-    }
-    if (len > 4 && (strcmp(filename + len - 4, ".tga") == 0 ||
-                    strcmp(filename + len - 4, ".TGA") == 0)) {
-        return loadTGAEx(filename, wrapMode);
-    }
-    conLogf("texture: unknown format for %s (use .bmp or .tga)\n", filename);
-    return 0;
+    return loadTextureExA(filename, wrapMode, 0);
 }
 
-/* Backward-compatible wrapper: loads with GL_CLAMP_TO_EDGE */
+/* Backward-compatible wrapper: loads with GL_CLAMP_TO_EDGE. */
 static GLuint loadTexture(const char *filename)
 {
     return loadTextureEx(filename, GL_CLAMP_TO_EDGE);
@@ -200,6 +79,7 @@ struct TexCacheEntry {
     char path[128];
     GLuint texID;
     int wrapMode;
+    int keepAlpha;
 };
 
 struct TexCache {
@@ -212,29 +92,37 @@ static void texCacheInit(TexCache *tc)
     tc->count = 0;
 }
 
-/* Get or load a texture. Returns GL texture ID, or 0 if file not found. */
-static GLuint texCacheGet(TexCache *tc, const char *path, int wrapMode)
+/* Get or load a texture. Returns GL texture ID, or 0 if file not found.
+   keepAlpha=1 uploads the texture as RGBA (for alpha-test materials or
+   RGBA overlays). The flag is part of the cache key so the same file
+   can coexist as RGB and RGBA if a caller ever needs both. */
+static GLuint texCacheGetA(TexCache *tc, const char *path, int wrapMode, int keepAlpha)
 {
     if (!path || !path[0]) return 0;
 
-    /* Check cache (path + wrapMode must both match) */
     for (int i = 0; i < tc->count; i++) {
         if (tc->entries[i].wrapMode == wrapMode &&
+            tc->entries[i].keepAlpha == keepAlpha &&
             strcmp(tc->entries[i].path, path) == 0) {
             return tc->entries[i].texID;
         }
     }
 
-    /* Load new */
-    GLuint tex = loadTextureEx(path, wrapMode);
+    GLuint tex = loadTextureExA(path, wrapMode, keepAlpha);
     if (tex && tc->count < TEX_CACHE_MAX) {
         strncpy(tc->entries[tc->count].path, path, 127);
         tc->entries[tc->count].path[127] = '\0';
         tc->entries[tc->count].texID = tex;
         tc->entries[tc->count].wrapMode = wrapMode;
+        tc->entries[tc->count].keepAlpha = keepAlpha;
         tc->count++;
     }
     return tex;
+}
+
+static GLuint texCacheGet(TexCache *tc, const char *path, int wrapMode)
+{
+    return texCacheGetA(tc, path, wrapMode, 0);
 }
 
 static void texCacheFree(TexCache *tc)
