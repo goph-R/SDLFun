@@ -146,13 +146,15 @@ static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
     pw->world->addAction(pw->character);
 }
 
-static void physGetPlayerPos(PhysWorld *pw, float *x, float *y, float *z)
+static Vec3 physGetPlayerPos(PhysWorld *pw)
 {
     btTransform t = pw->ghostObject->getWorldTransform();
     btVector3 p = t.getOrigin();
-    *x = p.getX();
-    *y = p.getY();
-    *z = p.getZ();
+    Vec3 r;
+    r.x = p.getX();
+    r.y = p.getY();
+    r.z = p.getZ();
+    return r;
 }
 
 /* Static box collider for decorations. hx/hy/hz are half-extents in the
@@ -160,15 +162,12 @@ static void physGetPlayerPos(PhysWorld *pw, float *x, float *y, float *z)
    Returns the rigid body as a void* so non-Bullet callers (entity.h) can
    hold onto it without pulling in Bullet headers.
    Pass the returned pointer to physRemoveStaticBox() at cleanup. */
-static void *physAddStaticBox(PhysWorld *pw,
-                              float cx, float cy, float cz,
-                              float hx, float hy, float hz,
-                              float rotY)
+static void *physAddStaticBox(PhysWorld *pw, Vec3 center, Vec3 halfExtents, float rotY)
 {
-    btBoxShape *shape = new btBoxShape(btVector3(hx, hy, hz));
+    btBoxShape *shape = new btBoxShape(btVector3(halfExtents.x, halfExtents.y, halfExtents.z));
     btTransform tr;
     tr.setIdentity();
-    tr.setOrigin(btVector3(cx, cy, cz));
+    tr.setOrigin(btVector3(center.x, center.y, center.z));
     btQuaternion q;
     q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
     tr.setRotation(q);
@@ -193,15 +192,12 @@ static void physRemoveStaticBox(PhysWorld *pw, void *bodyPtr)
 /* Kinematic box — same as static but movable. Used for doors: mass 0, but
    CF_KINEMATIC_OBJECT so Bullet pushes dynamic/character bodies out of the
    way when we reposition it. Remove with physRemoveStaticBox (same teardown). */
-static void *physAddKinematicBox(PhysWorld *pw,
-                                 float cx, float cy, float cz,
-                                 float hx, float hy, float hz,
-                                 float rotY)
+static void *physAddKinematicBox(PhysWorld *pw, Vec3 center, Vec3 halfExtents, float rotY)
 {
-    btBoxShape *shape = new btBoxShape(btVector3(hx, hy, hz));
+    btBoxShape *shape = new btBoxShape(btVector3(halfExtents.x, halfExtents.y, halfExtents.z));
     btTransform tr;
     tr.setIdentity();
-    tr.setOrigin(btVector3(cx, cy, cz));
+    tr.setOrigin(btVector3(center.x, center.y, center.z));
     btQuaternion q;
     q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
     tr.setRotation(q);
@@ -234,8 +230,7 @@ struct _PhysNotMeConvexCB : public btCollisionWorld::ClosestConvexResultCallback
     }
 };
 
-static int physMoveKinematicBox(PhysWorld *pw, void *bodyPtr,
-                                float cx, float cy, float cz, float rotY)
+static int physMoveKinematicBox(PhysWorld *pw, void *bodyPtr, Vec3 center, float rotY)
 {
     if (!bodyPtr) return 0;
     btRigidBody *body = (btRigidBody *)bodyPtr;
@@ -244,7 +239,7 @@ static int physMoveKinematicBox(PhysWorld *pw, void *bodyPtr,
     btTransform from = body->getWorldTransform();
     btTransform to;
     to.setIdentity();
-    to.setOrigin(btVector3(cx, cy, cz));
+    to.setOrigin(btVector3(center.x, center.y, center.z));
     btQuaternion q;
     q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
     to.setRotation(q);
@@ -271,8 +266,7 @@ struct PhysTrimeshHandle {
 };
 
 static void *physAddStaticTrimesh(PhysWorld *pw, ObjMesh *mesh,
-                                  float cx, float cy, float cz,
-                                  float rotY, float scale)
+                                  Vec3 center, float rotY, float scale)
 {
     if (mesh->numTris == 0) return NULL;
     btTriangleMesh *tri = new btTriangleMesh();
@@ -291,7 +285,7 @@ static void *physAddStaticTrimesh(PhysWorld *pw, ObjMesh *mesh,
 
     btTransform tr;
     tr.setIdentity();
-    tr.setOrigin(btVector3(cx, cy, cz));
+    tr.setOrigin(btVector3(center.x, center.y, center.z));
     btQuaternion q;
     q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
     tr.setRotation(q);
@@ -406,23 +400,26 @@ static void physRemoveStaticTrimesh(PhysWorld *pw, void *handlePtr)
     free(h);
 }
 
-/* Raycast from a point in a direction. Returns 1 if hit, fills hitPos.
-   maxDist = maximum ray length. */
-static int physRaycast(PhysWorld *pw, float fromX, float fromY, float fromZ,
-                       float dirX, float dirY, float dirZ, float maxDist,
-                       float *hitX, float *hitY, float *hitZ)
+/* Raycast from a point in a direction. Returns 1 if hit, fills *hitOut.
+   maxDist = maximum ray length. hitOut may be NULL when only the hit/no-hit
+   answer is needed (e.g. nav LOS checks). */
+static int physRaycast(PhysWorld *pw, Vec3 from, Vec3 dir, float maxDist, Vec3 *hitOut)
 {
-    btVector3 from(fromX, fromY, fromZ);
-    btVector3 to(fromX + dirX * maxDist, fromY + dirY * maxDist, fromZ + dirZ * maxDist);
+    btVector3 bFrom(from.x, from.y, from.z);
+    btVector3 bTo(from.x + dir.x * maxDist,
+                  from.y + dir.y * maxDist,
+                  from.z + dir.z * maxDist);
 
-    btCollisionWorld::ClosestRayResultCallback ray(from, to);
+    btCollisionWorld::ClosestRayResultCallback ray(bFrom, bTo);
     ray.m_collisionFilterMask = btBroadphaseProxy::StaticFilter;
-    pw->world->rayTest(from, to, ray);
+    pw->world->rayTest(bFrom, bTo, ray);
 
     if (ray.hasHit()) {
-        *hitX = ray.m_hitPointWorld.getX();
-        *hitY = ray.m_hitPointWorld.getY();
-        *hitZ = ray.m_hitPointWorld.getZ();
+        if (hitOut) {
+            hitOut->x = ray.m_hitPointWorld.getX();
+            hitOut->y = ray.m_hitPointWorld.getY();
+            hitOut->z = ray.m_hitPointWorld.getZ();
+        }
         return 1;
     }
     return 0;

@@ -101,9 +101,8 @@ static int gameInit(Game *g,
         float s = (e->scale > 0.0f) ? e->scale : 1.0f;
 
         if (e->collide == 2) {
-            e->physBody = physAddStaticTrimesh(&g->phys, &e->mesh,
-                                               e->posX, e->posY, e->posZ,
-                                               e->rotY, s);
+            Vec3 ec = { e->posX, e->posY, e->posZ };
+            e->physBody = physAddStaticTrimesh(&g->phys, &e->mesh, ec, e->rotY, s);
             conLogf("entity: %s collider (trimesh %d tris at %.2f,%.2f,%.2f)\n",
                    e->name, e->mesh.numTris, e->posX, e->posY, e->posZ);
             continue;
@@ -133,17 +132,17 @@ static int gameInit(Game *g,
         float wy = e->posY + lcy;
         float wz = e->posZ + (-sn * lcx + cs * lcz);
 
+        Vec3 wc = { wx, wy, wz };
+        Vec3 he = { hx, hy, hz };
         if (e->type == ENT_DOOR) {
             e->door.lcx = lcx;
             e->door.lcy = lcy;
             e->door.lcz = lcz;
-            e->physBody = physAddKinematicBox(&g->phys, wx, wy, wz,
-                                              hx, hy, hz, e->rotY);
+            e->physBody = physAddKinematicBox(&g->phys, wc, he, e->rotY);
             conLogf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
                    e->name, hx*2, hy*2, hz*2);
         } else {
-            e->physBody = physAddStaticBox(&g->phys, wx, wy, wz,
-                                           hx, hy, hz, e->rotY);
+            e->physBody = physAddStaticBox(&g->phys, wc, he, e->rotY);
             conLogf("entity: %s collider (box %.2fx%.2fx%.2f at %.2f,%.2f,%.2f)\n",
                    e->name, hx*2, hy*2, hz*2, wx, wy, wz);
         }

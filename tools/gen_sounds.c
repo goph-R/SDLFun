@@ -107,7 +107,7 @@ int main(void)
     n = 2205;
     pcm = (short*)malloc(n * sizeof(short));
     gen_footstep(pcm, n);
-    write_wav_mono16("assets/sounds/step.wav", pcm, n, SAMPLE_RATE);
+    write_wav_mono16("assets/sounds/step1.wav", pcm, n, SAMPLE_RATE);
     free(pcm);
 
     n = 4410;

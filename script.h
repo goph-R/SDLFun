@@ -53,7 +53,9 @@ static int scr_ui_show_message(lua_State *L)
     return 0;
 }
 
-/* snd_play(name) — silently warns and returns if the name isn't registered. */
+/* snd_play(name)            — head-relative (2D), for player events / UI.
+   snd_play(name, x, y, z)   — positioned in world space (3D).
+   Silently warns and returns if the name isn't registered. */
 static int scr_snd_play(lua_State *L)
 {
     lua_getfield(L, LUA_REGISTRYINDEX, "sdlfun.sys");
@@ -61,12 +63,20 @@ static int scr_snd_play(lua_State *L)
     lua_pop(L, 1);
 
     const char *name = luaL_checkstring(L, 1);
-    SoundBuffer b = sndLibFind(s->sndLib, name);
+    SoundBuffer b = sndLibPick(s->sndLib, name);
     if (!b) {
         conLogf("snd_play: unknown sound '%s'\n", name);
         return 0;
     }
-    sndPlay(s->snd, b);
+    if (lua_gettop(L) >= 4) {
+        Vec3 p;
+        p.x = (float)luaL_checknumber(L, 2);
+        p.y = (float)luaL_checknumber(L, 3);
+        p.z = (float)luaL_checknumber(L, 4);
+        sndPlayAt(s->snd, b, p);
+    } else {
+        sndPlay(s->snd, b);
+    }
     return 0;
 }
 
@@ -201,7 +211,43 @@ static int scr_walkStringTable(lua_State *L, ScriptSystem *s,
 
 static void scr_onSound(ScriptSystem *s, const char *name, const char *path)
 {
-    sndLibRegister(s->sndLib, name, sndLoadWav(path));
+    sndLibAdd(s->sndLib, name, sndLoadWav(path));
+}
+
+/* Walk the manifest's `sounds` subtable. A value can be either a single
+   path string (registers one buffer under `name`) or an array of paths
+   (registers all of them as variants of the same group, picked randomly
+   at play time). Anything else is skipped with a warning. */
+static int scr_walkSoundsTable(lua_State *L, ScriptSystem *s)
+{
+    if (!lua_istable(L, -1)) return 0;
+    int count = 0;
+    lua_pushnil(L);
+    while (lua_next(L, -2) != 0) {
+        /* stack: ... soundsTable, key, value */
+        lua_pushvalue(L, -2);  /* dup key (lua_tostring may mutate) */
+        const char *name = lua_tostring(L, -1);
+
+        if (name && lua_isstring(L, -2)) {
+            scr_onSound(s, name, lua_tostring(L, -2));
+            count++;
+        } else if (name && lua_istable(L, -2)) {
+            /* Iterate the variant array. Use ipairs-style sequential keys. */
+            int n = (int)lua_objlen(L, -2);
+            for (int i = 1; i <= n; i++) {
+                lua_rawgeti(L, -2, i);
+                if (lua_isstring(L, -1)) {
+                    scr_onSound(s, name, lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+            if (n > 0) count++;
+        } else if (name) {
+            conLogf("script: sounds.%s must be a path string or array of paths\n", name);
+        }
+        lua_pop(L, 2);  /* key-copy and value */
+    }
+    return count;
 }
 static void scr_onModel(ScriptSystem *s, const char *name, const char *path)
 {
@@ -243,7 +289,7 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     }
 
     lua_getfield(L, -1, "sounds");
-    int sounds = scr_walkStringTable(L, s, scr_onSound);
+    int sounds = scr_walkSoundsTable(L, s);
     lua_pop(L, 1);
 
     lua_getfield(L, -1, "models");

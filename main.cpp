@@ -6,6 +6,7 @@
 #include <GL/gl.h>
 #include <cstdlib>
 #include <cstdio>
+#include <ctime>
 #include <math.h>
 
 #ifndef M_PI
@@ -175,12 +176,11 @@ static void glSetPerspective(float fovDeg, float aspect, float zNear, float zFar
     glMultMatrixf(m);
 }
 
-static void glLookAt(float eyeX, float eyeY, float eyeZ,
-                     float atX, float atY, float atZ)
+static void glLookAt(Vec3 eye, Vec3 at)
 {
-    float fx = atX - eyeX;
-    float fy = atY - eyeY;
-    float fz = atZ - eyeZ;
+    float fx = at.x - eye.x;
+    float fy = at.y - eye.y;
+    float fz = at.z - eye.z;
     float flen = sqrtf(fx*fx + fy*fy + fz*fz);
     fx /= flen; fy /= flen; fz /= flen;
 
@@ -203,7 +203,7 @@ static void glLookAt(float eyeX, float eyeY, float eyeZ,
           0,   0,   0, 1
     };
     glMultMatrixf(mat);
-    glTranslatef(-eyeX, -eyeY, -eyeZ);
+    glTranslatef(-eye.x, -eye.y, -eye.z);
 }
 
 /* ---- Tiling UV computation (Quake-style box mapping) ---- */
@@ -598,7 +598,8 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
         float cy = ny + e->door.lcy;
         float cz = nz + (-sn * e->door.lcx + cs * e->door.lcz);
 
-        if (physMoveKinematicBox(pw, e->physBody, cx, cy, cz, nr)) {
+        Vec3 mc = { cx, cy, cz };
+        if (physMoveKinematicBox(pw, e->physBody, mc, nr)) {
             e->door.progress = target;
             e->posX = nx; e->posY = ny; e->posZ = nz; e->rotY = nr;
             if (target >= 1.0f) {
@@ -643,6 +644,10 @@ int main(int argc, char *argv[])
        display, so later we can reapply it over SDL's fullscreen mode
        (which otherwise drops to the driver's 60Hz default on Win9x). */
     saveDesktopRefreshHz();
+
+    /* Seed rand() once. Used by sndLibPick for non-repeating sound variant
+       picks; further uses can rely on it without re-seeding. */
+    srand((unsigned)time(NULL));
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         conLogf("SDL_Init failed: %s\n", SDL_GetError());
@@ -863,9 +868,7 @@ int main(int argc, char *argv[])
                     /* One-shot A* test from player to the last waypoint so the
                        pathfinder has been exercised before any AI uses it. */
                     if (game.debugNav && game.nav.numNodes >= 2) {
-                        float px, py, pz;
-                        physGetPlayerPos(&game.phys, &px, &py, &pz);
-                        Vec3 from; from.x = px; from.y = py; from.z = pz;
+                        Vec3 from = physGetPlayerPos(&game.phys);
                         Vec3 to = game.nav.nodes[game.nav.numNodes - 1];
                         int path[NAV_MAX_NODES];
                         int len = navFindPath(&game.nav, &game.phys, from, to,
@@ -877,15 +880,14 @@ int main(int argc, char *argv[])
                     }
                 }
                 if (event.key.keysym.sym == SDLK_p) {
-                    float _px, _py, _pz;
-                    physGetPlayerPos(&game.phys, &_px, &_py, &_pz);
+                    Vec3 p = physGetPlayerPos(&game.phys);
                     conLogf("player pos: X=%.3f Y=%.3f Z=%.3f  yaw=%.1f pitch=%.1f\n",
-                           _px, _py, _pz, game.yaw, game.pitch);
+                           p.x, p.y, p.z, game.yaw, game.pitch);
                 }
                 if (event.key.keysym.sym == SDLK_SPACE) {
                     if (game.phys.character->onGround()) {
                         game.phys.character->jump();
-                        sndPlay(&snd, sndLibFind(&sndLib, "jump"));
+                        sndPlay(&snd, sndLibPick(&sndLib, "jump"));
                     }
                 }
             }
@@ -893,7 +895,7 @@ int main(int argc, char *argv[])
                 if (event.button.button == SDL_BUTTON_LEFT &&
                     !conCapturesInput(&con)) {
                     game.gunFlashTimer = 4;
-                    sndPlay(&snd, sndLibFind(&sndLib, "fire"));
+                    sndPlay(&snd, sndLibPick(&sndLib, "fire"));
                 }
             }
             if (event.type == SDL_MOUSEMOTION && !conCapturesInput(&con)) {
@@ -959,7 +961,7 @@ int main(int argc, char *argv[])
         if (isMoving && game.phys.character->onGround()) {
             game.footstepTimer -= (int)(dt * 1000);
             if (game.footstepTimer <= 0) {
-                sndPlay(&snd, sndLibFind(&sndLib, "step"));
+                sndPlay(&snd, sndLibPick(&sndLib, "steps"));
                 game.footstepTimer = 400;
             }
         } else {
@@ -968,16 +970,28 @@ int main(int argc, char *argv[])
 
         physStep(&game.phys, dt);
 
-        float px, py, pz;
-        physGetPlayerPos(&game.phys, &px, &py, &pz);
+        Vec3 ppos = physGetPlayerPos(&game.phys);
+        float px = ppos.x, py = ppos.y, pz = ppos.z;
         /* Capsule center is 0.875m above the floor when grounded (halfHeight
            0.525 + radius 0.35), so +0.755 puts the camera at 1.63m — realistic
            eye height for a 1.75m-tall person. */
-        float eyeY = py + 0.765f;
+        Vec3 eye = { px, py + 0.765f, pz };
+        float eyeY = eye.y;
 
-        float lookX = px + forwardX;
-        float lookY = eyeY + sinf(game.pitch * (float)M_PI / 180.0f);
-        float lookZ = pz + forwardZ;
+        Vec3 look = { px + forwardX,
+                      eyeY + sinf(game.pitch * (float)M_PI / 180.0f),
+                      pz + forwardZ };
+        float lookX = look.x, lookY = look.y, lookZ = look.z;
+
+        /* Push camera pose to OpenAL so positioned sounds (sndPlayAt /
+           snd_play with coords) pan and attenuate correctly. Up vector
+           is world Y; the strafe roll above is a visual flourish only,
+           we don't roll the listener with it. */
+        {
+            Vec3 lfwd = { lookX - px, lookY - eyeY, lookZ - pz };
+            Vec3 lup  = { 0.0f, 1.0f, 0.0f };
+            sndUpdateListener(&snd, eye, lfwd, lup);
+        }
 
         if (game.gunFlashTimer > 0) game.gunFlashTimer--;
 
@@ -1005,7 +1019,7 @@ int main(int argc, char *argv[])
             glRotatef(roll, 0.0f, 0.0f, 1.0f);
         }
 
-        glLookAt(px, eyeY, pz, lookX, lookY, lookZ);
+        glLookAt(eye, look);
 
         /* Light position must be submitted AFTER the view matrix is on the
            stack — glLightfv transforms the position by the current modelview,
@@ -1021,11 +1035,11 @@ int main(int argc, char *argv[])
             float dirLen = sqrtf(dirX*dirX + dirY*dirY + dirZ*dirZ);
             if (dirLen > 0.0001f) { dirX /= dirLen; dirY /= dirLen; dirZ /= dirLen; }
 
-            float hitX, hitY, hitZ;
-            if (physRaycast(&game.phys, px, eyeY, pz, dirX, dirY, dirZ, 30.0f,
-                            &hitX, &hitY, &hitZ)) {
-                dynLmUpdate(&game.dynLm, hitX, hitY, hitZ,
-                            3.0f, 1.0f, 1.0f, 0.95f, 0.8f);
+            Vec3 dir = { dirX, dirY, dirZ };
+            Vec3 hit;
+            if (physRaycast(&game.phys, eye, dir, 30.0f, &hit)) {
+                Vec3 col = { 1.0f, 0.95f, 0.8f };
+                dynLmUpdate(&game.dynLm, hit, 3.0f, 1.0f, col);
             } else {
                 dynLmRestore(&game.dynLm);
             }

@@ -61,17 +61,14 @@ static float nav_dist(Vec3 a, Vec3 b)
    we don't self-hit geometry tangent to the endpoint. */
 static int nav_los(PhysWorld *pw, Vec3 a, Vec3 b)
 {
-    float ax = a.x, ay = a.y + NAV_EYE_OFFSET, az = a.z;
-    float bx = b.x, by = b.y + NAV_EYE_OFFSET, bz = b.z;
-    float dx = bx - ax, dy = by - ay, dz = bz - az;
+    Vec3 from = { a.x, a.y + NAV_EYE_OFFSET, a.z };
+    Vec3 to   = { b.x, b.y + NAV_EYE_OFFSET, b.z };
+    float dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
     float dist = sqrtf(dx*dx + dy*dy + dz*dz);
     if (dist < 1e-4f) return 1;
     float invD = 1.0f / dist;
-    float hx, hy, hz;
-    int hit = physRaycast(pw, ax, ay, az,
-                          dx * invD, dy * invD, dz * invD,
-                          dist - 0.05f,
-                          &hx, &hy, &hz);
+    Vec3 dir = { dx * invD, dy * invD, dz * invD };
+    int hit = physRaycast(pw, from, dir, dist - 0.05f, NULL);
     return !hit;
 }
 

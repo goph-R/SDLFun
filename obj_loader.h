@@ -5,16 +5,10 @@
 #include <cstring>
 #include <cstdlib>
 
+#include "math.h"
+
 #define OBJ_MAX_MATERIALS 32
 #define OBJ_MAX_SECTORS   32
-
-struct Vec3 {
-    float x, y, z;
-};
-
-struct Vec2 {
-    float u, v;
-};
 
 struct Material {
     char name[64];

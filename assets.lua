@@ -15,9 +15,17 @@
 
 return {
     sounds = {
-        fire = "assets/sounds/fire.wav",
-        step = "assets/sounds/step.wav",
-        jump = "assets/sounds/jump.wav",
+        -- Single sounds: name = "path"
+        fire  = "assets/sounds/fire.wav",
+        jump  = "assets/sounds/jump.wav",
+        -- Random-pick groups: name = { "path1", "path2", ... }. snd_play
+        -- (or sndLibPick from C) picks a uniformly-random non-repeating
+        -- variant each call. Up to SND_MAX_VARIANTS (4) per group.
+        steps = {
+            "assets/sounds/step1.wav",
+            -- "assets/sounds/step2.wav",
+            -- "assets/sounds/step3.wav",
+        },
     },
 
     models = {

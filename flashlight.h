@@ -81,16 +81,18 @@ struct DynLightmap {
 /* Fills worldPosMap for texels covered by a triangle */
 
 static void rasterTriInUV(DynLightmap *dl,
-                          float u0, float v0, float wx0, float wy0, float wz0,
-                          float u1, float v1, float wx1, float wy1, float wz1,
-                          float u2, float v2, float wx2, float wy2, float wz2)
+                          Vec2 t0, Vec2 t1, Vec2 t2,
+                          Vec3 w0, Vec3 w1, Vec3 w2)
 {
     int w = dl->width, h = dl->height;
+    float wx0 = w0.x, wy0 = w0.y, wz0 = w0.z;
+    float wx1 = w1.x, wy1 = w1.y, wz1 = w1.z;
+    float wx2 = w2.x, wy2 = w2.y, wz2 = w2.z;
 
     /* Scale UVs to pixel coordinates */
-    float px0 = u0 * w, py0 = v0 * h;
-    float px1 = u1 * w, py1 = v1 * h;
-    float px2 = u2 * w, py2 = v2 * h;
+    float px0 = t0.u * w, py0 = t0.v * h;
+    float px1 = t1.u * w, py1 = t1.v * h;
+    float px2 = t2.u * w, py2 = t2.v * h;
 
     /* Bounding box in pixel space */
     int minX = (int)px0, maxX = (int)px0;
@@ -153,10 +155,7 @@ static void dynLmBuildWorldPosMap(DynLightmap *dl, ObjMesh *mesh)
         Vec2 *tc1 = &mesh->texcoords[t->t[1]];
         Vec2 *tc2 = &mesh->texcoords[t->t[2]];
 
-        rasterTriInUV(dl,
-                      tc0->u, tc0->v, v0->x, v0->y, v0->z,
-                      tc1->u, tc1->v, v1->x, v1->y, v1->z,
-                      tc2->u, tc2->v, v2->x, v2->y, v2->z);
+        rasterTriInUV(dl, *tc0, *tc1, *tc2, *v0, *v1, *v2);
         rasterized++;
     }
     conLogf("flashlight: rasterized %d triangles into %dx%d worldPosMap\n",
@@ -204,14 +203,15 @@ static int dynLmInit(DynLightmap *dl, const char *lmPath, ObjMesh *mesh, GLuint 
 
 /* ---- Update lightmap with flashlight contribution ---- */
 
-static void dynLmUpdate(DynLightmap *dl, float hitX, float hitY, float hitZ,
-                        float radius, float intensity,
-                        float colorR, float colorG, float colorB)
+static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
+                        float radius, float intensity, Vec3 color)
 {
     if (!dl->bakedPixels || !dl->worldPosMap) return;
 
     int w = dl->width, h = dl->height;
     float radiusSq = radius * radius;
+    float hitX = hit.x, hitY = hit.y, hitZ = hit.z;
+    float colorR = color.x, colorG = color.y, colorB = color.z;
 
     /* Reset working buffer to baked state */
     memcpy(dl->workPixels, dl->bakedPixels, w * h * 3);
