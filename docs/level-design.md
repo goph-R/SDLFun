@@ -6,7 +6,7 @@ How to create levels with diffuse textures and baked lightmaps for the SDLFun FP
 
 - Blender 2.8+ (any modern version)
 - The level is exported as Wavefront OBJ with UVs
-- Textures are exported as 24-bit BMP files
+- Textures are exported as **PNG** (24-bit RGB, or 32-bit RGBA for alpha-test cutouts). The engine no longer reads BMP or TGA — see `docs/features.md` §3.1 for the asset pipeline summary.
 
 ## Step 1: Model the Level
 
@@ -50,8 +50,8 @@ textures tile automatically without UV unwrapping. To preview this in Blender:
 ### Single-Material Levels (Simple Mode)
 
 If you don't use materials (no `mtllib`/`usemtl` in the OBJ), the engine falls back to
-loading `diffuse.bmp` and `lightmap.bmp` from the game directory. This is the original
-behavior - one texture atlas for the whole level.
+loading `assets/levels/diffuse.png` and `assets/levels/lightmap.png`. This is the original
+behavior — one texture atlas for the whole level.
 
 ## Step 3: UV Unwrap for Lightmap
 
@@ -61,7 +61,7 @@ The OBJ's UV coordinates are used **only for the lightmap**, not for diffuse tex
 2. Select All (`A`)
 3. `UV` > `Smart UV Project`
    - Angle Limit: 66 degrees works well
-   - Island Margin: 0.02 - 0.03 (prevents bleeding between UV islands)
+   - Island Margin: **0.04** for levels that use the dynamic flashlight; 0.02–0.03 is fine if you don't. The flashlight rasterizes triangles into UV space and writes near triangle edges every frame, so a tighter margin produces visible spill artifacts. The widely-quoted "tight as possible" advice does not apply here.
 4. Open UV Editor to verify the unwrap looks reasonable
 
 ## Step 4: Set Up Lighting for Lightmap
@@ -94,8 +94,8 @@ Blender where to bake to.
    - Bake Type: `Diffuse`
    - Under Influence, check only `Color` (uncheck Direct, Indirect)
    - Click `Bake`
-5. Save the image: Image Editor > Image > Save As > **BMP format**
-   - Save as `diffuse.bmp` in your SDLFun folder
+5. Save the image: Image Editor > Image > Save As > **PNG format**
+   - Save as `diffuse.png` in `assets/levels/`
 
 ### Bake Lightmap (Single-Material Mode)
 
@@ -108,7 +108,7 @@ Blender where to bake to.
    - Under Influence, check `Direct` and `Indirect` (uncheck `Color`)
    - This bakes only the lighting, not the surface color
    - Click `Bake`
-4. Save as `lightmap.bmp` in your SDLFun folder
+4. Save as `lightmap.png` in `assets/levels/`
 
 ### Bake Per-Sector Lightmaps (Multi-Material Mode)
 
@@ -117,7 +117,7 @@ When using multiple materials, bake a separate lightmap for each material/sector
 1. For each material, create a lightmap image (e.g., `brick_wall_lm` at 256x256 or 512x512)
 2. In each material's shader nodes, add an Image Texture node with that material's lightmap image selected
 3. Bake with Diffuse > Direct + Indirect (no Color) as above
-4. Save each as `<materialname>_lm.bmp` (this matches the engine's naming convention)
+4. Save each as `<materialname>_lm.png` (this matches the engine's default naming convention; override with `# lm_map` in the MTL if you put the file somewhere else)
 
 ## Step 6: Export OBJ
 
@@ -150,59 +150,79 @@ When using multiple materials, bake a separate lightmap for each material/sector
 
 ```
 newmtl brick_wall
-map_Kd brick.bmp
-# lm_map brick_wall_lm.bmp
+map_Kd brick.png
+# lm_map brick_wall_lm.png
 # tile_scale 0.5
 # tile_offset 0.0 0.0
 
 newmtl concrete_floor
-map_Kd concrete.bmp
-# lm_map concrete_floor_lm.bmp
+map_Kd concrete.png
+# lm_map concrete_floor_lm.png
 # tile_scale 1.0
 # tile_offset 0.25 0.1
+
+newmtl chainlink_fence
+map_Kd chainlink.png
+# lm_map chainlink_lm.png
+# alpha_test 0.5
 ```
 
 ### MTL Custom Properties
 
 | Property | Format | Default | Description |
 |---|---|---|---|
-| `map_Kd` | `map_Kd filename.bmp` | (none) | Tiling diffuse texture (GL_REPEAT) |
-| `# lm_map` | `# lm_map filename.bmp` | `<name>_lm.bmp` | Per-sector lightmap (GL_CLAMP_TO_EDGE) |
+| `map_Kd` | `map_Kd filename.png` | (none) | Tiling diffuse texture (`GL_REPEAT`) |
+| `# lm_map` | `# lm_map filename.png` | `<name>_lm.png` | Per-sector lightmap (`GL_CLAMP_TO_EDGE`) |
 | `# tile_scale` | `# tile_scale 0.5` | `1.0` | Texture repeats per world unit |
 | `# tile_offset` | `# tile_offset 0.25 0.1` | `0.0 0.0` | UV offset (matches Blender Mapping > Location) |
+| `# alpha_test` | `# alpha_test [threshold]` | off (`0.5` if enabled) | Cutout transparency. The diffuse PNG must be 32-bit RGBA. Pixels whose alpha is ≤ threshold are discarded. Used for fences, foliage, grates. |
 
 ## Step 7: Run the Game
 
 ### Single-Material Mode
 
-Place these files in the SDLFun folder:
-- `test_level.obj` - the level geometry with UVs
-- `diffuse.bmp` - the wall/floor texture atlas (24-bit BMP)
-- `lightmap.bmp` - the baked lighting (24-bit BMP)
+Place these under `assets/levels/`:
+- `test_level.obj` — the level geometry with UVs
+- `diffuse.png` — the wall/floor texture atlas
+- `lightmap.png` — the baked lighting
 
 ### Multi-Material Mode
 
-Place these files in the SDLFun folder:
-- `test_level.obj` - geometry with `mtllib` reference
-- `test_level.mtl` - material definitions
-- Tiling diffuse textures (e.g., `brick.bmp`, `concrete.bmp`)
-- Per-sector lightmaps (e.g., `brick_wall_lm.bmp`, `concrete_floor_lm.bmp`)
+Place these under `assets/levels/`:
+- `test_level.obj` — geometry with `mtllib` reference
+- `test_level.mtl` — material definitions
+- Tiling diffuse textures (e.g., `brick.png`, `concrete.png`) — typically under `assets/textures/`
+- Per-sector lightmaps (e.g., `brick_wall_lm.png`, `concrete_floor_lm.png`)
 
 The engine automatically detects whether materials are present and switches between
 single-texture and sector-based rendering.
+
+### Player spawn
+
+The player spawn position is **not** hardcoded — it comes from a `player`
+entity in `test_level.ent`:
+
+```
+player spawn - 0 1 0 0
+```
+
+(`type name group posX posY posZ rotY`). If no `player` entity is present,
+the engine falls back to (0, 2, 0). Add other entities (decorations, doors,
+triggers, waypoints) to the same `.ent` file. See `docs/features.md` §6 for
+the entity types and `.ent` syntax.
 
 ## Tips
 
 - **Texture size**: 512x512 is fine for a P4, 1024x1024 is the practical max
 - **Keep geometry low-poly**: Aim for under 5000 triangles per level
 - **Slopes**: Any angle up to 50 degrees is walkable by the player
-- **Player spawn**: The player spawns at (0, 2, 0) - make sure there's floor there
-- **Scale**: 1 unit = 1 meter. Player is 1.75m tall. Standard room height is ~3-4m
+- **Player spawn**: defined by a `player` entity in the level's `.ent` file (see "Player spawn" above). Make sure there's floor under it.
+- **Scale**: 1 unit = 1 meter. Player is 1.75 m tall. Standard room height is ~3–4 m.
 - **Test often**: Export and run the game to check scale and feel
-- **Lightmap resolution**: Lower res (256x256) gives a softer, more retro look
-- **BMP format**: Save as 24-bit, uncompressed. The engine does not support RLE or other compression
-- **UV island margin**: Set to 0.02-0.03 in Smart UV Project to prevent texture bleeding
-- **VRAM budget (32MB GPU)**: ~24MB for textures. Small tiling textures (128x128) + per-sector lightmaps (256x256) fit easily for 10+ rooms
+- **Lightmap resolution**: Lower res (256×256) gives a softer, more retro look
+- **PNG format**: 8-bit per channel. Use 32-bit RGBA only when you actually need alpha (cutouts, fonts) — the loader auto-flattens "all alpha = 255" inputs to RGB to avoid wasting VRAM.
+- **UV island margin**: 0.04 if the level uses the dynamic flashlight; 0.02–0.03 otherwise.
+- **VRAM budget (32MB GPU)**: ~24 MB for textures. Small tiling textures (128×128) + per-sector lightmaps (256×256) fit easily for 10+ rooms.
 
 ## File Format Notes
 
@@ -214,4 +234,7 @@ The engine reads standard Wavefront OBJ with these features:
 - Material library (`mtllib filename.mtl`) - optional, enables multi-material mode
 - Material switch (`usemtl name`) - assigns faces to materials/sectors
 
-Both BMP (24/32-bit) and TGA (24/32-bit uncompressed) textures are supported.
+Textures must be PNG. The loader is `stb_image` (vendored at
+`vendor/stb/stb_image.h`) — anything `stbi_load` accepts works, but the
+engine only opens files whose name ends in `.png`. BMP and TGA are no
+longer supported; the migration history lives in commit `456693f`.
