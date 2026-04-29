@@ -2,7 +2,7 @@
 
 A small FPS engine targeting everything from Windows 98 (Pentium 4, SDL 1.2, fixed-function OpenGL) through modern Linux and Windows. Bullet Physics, OpenAL Soft, header-only modules, no shaders.
 
-![SDLFun running on Windows 10](raw/screenshot.jpg)
+![SDLFun running on Windows 10](docs/screenshot.jpg)
 
 ## Building
 
