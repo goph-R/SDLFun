@@ -11,14 +11,19 @@ decoration mrfixit_01 props -2 0 -1 0 iqm=mrfixit scale=0.225 flip_cull=1
 
 # Workstation in Room 1 (desk with CRT, keyboard, tower PC, and chair)
 # Desk origin is bottom-center; monitor+keyboard sit on desk top (assumed ~0.75m high)
-decoration office_desk_01   props -2.7  0    -3   0   mesh=office_desk  tex=wood1   collide=box
-decoration crt_monitor_01   props -2.9  0.8  -3.2 0   mesh=crt_monitor  tex=office  collide=box
-decoration keyboard_01      props -2.5  0.8  -3.2 0   mesh=keyboard     tex=office  collide=box
-decoration pc_tower_01      props -2.9  0.8  -2.7 0   mesh=pc_tower     tex=office  collide=box
-decoration office_chair_01  props -2    0    -3.2 200 mesh=office_chair tex=office  collide=box
+decoration office_desk_01   props -4.2  0    -3   0   mesh=office_desk  tex=wood1   collide=box
+decoration crt_monitor_01   props -4.4  0.8  -3.2 0   mesh=crt_monitor  tex=office  collide=box
+decoration keyboard_01      props -4.0  0.8  -3.2 0   mesh=keyboard     tex=office  collide=box
+decoration pc_tower_01      props -4.4  0.8  -2.7 0   mesh=pc_tower     tex=office  collide=box
+decoration office_chair_01  props -3.5    0    -3.2 200 mesh=office_chair tex=office  collide=box
 # Sliding door — rises 1.2m when triggered, auto-closes after 3s
 #door slide_door_01  props 2 0 -3 0  mesh=door tex=wood1  motion=slide  axis=Y amount=1.2 speed=2.0 auto_close=3.0
 #trigger slide_trigger - 2 1 -1 0  size=1.5,2,1.5 target=slide_door_01 once=0
+
+decoration frame_01 props -4.75  1.6  -0.75  0  mesh=portrait_frame  tex=wood2
+decoration photo_01 props -4.75  1.6  -0.75  0  mesh=portrait_photo2 tex=portraits1
+decoration frame_02 props -4.75  1.6  -1.75  0  mesh=portrait_frame  tex=wood2
+decoration photo_02 props -4.75  1.6  -1.75  0  mesh=portrait_photo1 tex=portraits1
 
 # Rotating door — swings 90° open, auto-closes after 3s.
 # Note: door.obj origin is not on the hinge edge, so the rotation looks like
