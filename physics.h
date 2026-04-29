@@ -88,7 +88,7 @@ static void physLoadLevel(PhysWorld *pw, ObjMesh *mesh)
 static void physCreatePlayer(PhysWorld *pw, float x, float y, float z)
 {
     float playerHeight = 1.75f;
-    float playerRadius = 0.225f;  /* ~0.45m shoulder width */
+    float playerRadius = 0.30f;  /* ~0.6m shoulder width */
     float capsuleHeight = playerHeight - 2.0f * playerRadius;
 
     pw->capsuleShape = new btCapsuleShape(playerRadius, capsuleHeight);
