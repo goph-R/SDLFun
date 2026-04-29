@@ -18,5 +18,5 @@ find_package(OpenAL REQUIRED)
 
 include_directories(${SDL_INCLUDE_DIR} ${OPENAL_INCLUDE_DIR})
 
-add_executable(SDLFun main.cpp)
+add_executable(SDLFun main.cpp vendor/stb/stb_vorbis.c)
 target_link_libraries(SDLFun ${SDL_LIBS} ${OPENGL_LIBRARIES} ${OPENAL_LIBRARY})

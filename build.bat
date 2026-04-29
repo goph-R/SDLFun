@@ -75,6 +75,17 @@ C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendo
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
+REM  stb_vorbis (cached — delete raw\obj\vorbis.o to force rebuild)
+REM ----------------------------------------------------------------
+if exist %OBJDIR%\vorbis.o (
+    echo Skipping stb_vorbis ^(vorbis.o cached^)
+) else (
+    echo Compiling stb_vorbis...
+    C:\Dev-Cpp\bin\gcc.exe -O2 -c vendor\stb\stb_vorbis.c -o %OBJDIR%\vorbis.o
+    if errorlevel 1 goto error
+)
+
+REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling main...
@@ -85,7 +96,7 @@ REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-C:\Dev-Cpp\bin\g++.exe %OBJDIR%\main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
+C:\Dev-Cpp\bin\g++.exe %OBJDIR%\main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o %OBJDIR%\vorbis.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
 if errorlevel 1 goto error
 
 echo.

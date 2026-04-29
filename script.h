@@ -12,12 +12,15 @@
  *   ui_show_message(text [, seconds])   -> UiState transient message
  *   snd_play(name)                      -> SoundLibrary + SoundSystem
  *   ent_activate(target)                -> entActivate by name or group
+ *   music_play(name [, fade [, loop]])  -> MusicLibrary + MusicSystem
+ *   music_stop([fade])
+ *   music_volume(g)
  *
  * Entry points into Lua are scriptCall()'d nullary globals — v1 only
  * fires on_start() once after level load. No per-frame or trigger hooks
  * yet; those land once the binding is proven.
  *
- * This header must be included after sound.h, ui.h, and entity.h.
+ * This header must be included after sound.h, music.h, ui.h, and entity.h.
  */
 
 extern "C" {
@@ -34,6 +37,8 @@ struct ScriptSystem {
     UiState       *ui;
     SoundSystem   *snd;
     SoundLibrary  *sndLib;
+    MusicSystem   *music;
+    MusicLibrary  *musLib;
     EntityList    *entities;
     AssetRegistry *assets;
 };
@@ -77,6 +82,48 @@ static int scr_snd_play(lua_State *L)
     } else {
         sndPlay(s->snd, b);
     }
+    return 0;
+}
+
+/* music_play(name [, fadeSec [, loop]])
+     fadeSec defaults to 0.5; loop defaults to true.
+   Falls through to a raw path if the name isn't registered in musLib. */
+static int scr_music_play(lua_State *L)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, "sdlfun.sys");
+    ScriptSystem *s = (ScriptSystem *)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+
+    const char *name = luaL_checkstring(L, 1);
+    float fadeSec = (float)luaL_optnumber(L, 2, 0.5);
+    /* Default loop=true. lua_toboolean treats nil as false, so we have to
+       distinguish "not passed" from "passed false". */
+    int loop = (lua_gettop(L) >= 3) ? lua_toboolean(L, 3) : 1;
+    musicPlay(s->music, s->musLib, name, fadeSec, loop);
+    return 0;
+}
+
+/* music_stop([fadeSec]) — fadeSec defaults to 0.5. */
+static int scr_music_stop(lua_State *L)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, "sdlfun.sys");
+    ScriptSystem *s = (ScriptSystem *)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+
+    float fadeSec = (float)luaL_optnumber(L, 1, 0.5);
+    musicStop(s->music, fadeSec);
+    return 0;
+}
+
+/* music_volume(g) — clamped to [0,1] inside musicSetVolume. */
+static int scr_music_volume(lua_State *L)
+{
+    lua_getfield(L, LUA_REGISTRYINDEX, "sdlfun.sys");
+    ScriptSystem *s = (ScriptSystem *)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+
+    float g = (float)luaL_checknumber(L, 1);
+    musicSetVolume(s->music, g);
     return 0;
 }
 
@@ -131,11 +178,14 @@ static int scr_traceback(lua_State *L)
 /* ---- Lifecycle ---- */
 
 static int scriptInit(ScriptSystem *s, UiState *ui, SoundSystem *snd,
-                      SoundLibrary *sndLib, EntityList *el, AssetRegistry *reg)
+                      SoundLibrary *sndLib, MusicSystem *music,
+                      MusicLibrary *musLib, EntityList *el, AssetRegistry *reg)
 {
     s->ui       = ui;
     s->snd      = snd;
     s->sndLib   = sndLib;
+    s->music    = music;
+    s->musLib   = musLib;
     s->entities = el;
     s->assets   = reg;
 
@@ -155,6 +205,9 @@ static int scriptInit(ScriptSystem *s, UiState *ui, SoundSystem *snd,
     /* Register bindings into the global table. */
     lua_register(s->L, "ui_show_message", scr_ui_show_message);
     lua_register(s->L, "snd_play",        scr_snd_play);
+    lua_register(s->L, "music_play",      scr_music_play);
+    lua_register(s->L, "music_stop",      scr_music_stop);
+    lua_register(s->L, "music_volume",    scr_music_volume);
     lua_register(s->L, "ent_activate",    scr_ent_activate);
 
     conLogf("script: Lua %s initialised\n", LUA_VERSION);
@@ -249,6 +302,10 @@ static int scr_walkSoundsTable(lua_State *L, ScriptSystem *s)
     }
     return count;
 }
+static void scr_onMusic(ScriptSystem *s, const char *name, const char *path)
+{
+    musicLibAdd(s->musLib, name, path);
+}
 static void scr_onModel(ScriptSystem *s, const char *name, const char *path)
 {
     assetRegAddModel(s->assets, name, path);
@@ -292,6 +349,10 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     int sounds = scr_walkSoundsTable(L, s);
     lua_pop(L, 1);
 
+    lua_getfield(L, -1, "music");
+    int music = scr_walkStringTable(L, s, scr_onMusic);
+    lua_pop(L, 1);
+
     lua_getfield(L, -1, "models");
     int models = scr_walkStringTable(L, s, scr_onModel);
     lua_pop(L, 1);
@@ -305,8 +366,8 @@ static int scriptLoadAssets(ScriptSystem *s, const char *path)
     lua_pop(L, 1);
 
     lua_pop(L, 2);  /* manifest, traceback */
-    conLogf("assets: %d sound(s), %d model(s), %d texture(s), %d font(s) registered from %s\n",
-           sounds, models, textures, fonts, path);
+    conLogf("assets: %d sound(s), %d music, %d model(s), %d texture(s), %d font(s) registered from %s\n",
+           sounds, music, models, textures, fonts, path);
     return 1;
 }
 

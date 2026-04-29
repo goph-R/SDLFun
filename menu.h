@@ -124,6 +124,8 @@ struct AppState {
     ScriptSystem  *script;
     SoundSystem   *snd;
     SoundLibrary  *sndLib;
+    MusicSystem   *music;
+    MusicLibrary  *musLib;
 
     /* One-shot action consumed by main.cpp each frame. */
     int pendingAction;
@@ -642,7 +644,8 @@ static void screenRender(Screen *s, AppState *app)
 
 static void appInit(AppState *app, int screenW, int screenH,
                     UiState *ui, AssetRegistry *ar, ScriptSystem *script,
-                    SoundSystem *snd, SoundLibrary *sndLib)
+                    SoundSystem *snd, SoundLibrary *sndLib,
+                    MusicSystem *music, MusicLibrary *musLib)
 {
     memset(app, 0, sizeof(*app));
     app->mode      = MODE_MENU;
@@ -654,10 +657,17 @@ static void appInit(AppState *app, int screenW, int screenH,
     app->script    = script;
     app->snd       = snd;
     app->sndLib    = sndLib;
+    app->music     = music;
+    app->musLib    = musLib;
     texCacheInit(&app->menuTex);
 
     Screen mm = makeMainMenu(ui, /*haveGame=*/0);
     screenStackPush(&app->screens, &mm);
+
+    /* Title music: kicks in immediately on the menu and crossfades into
+       whatever the level's on_start picks. Falls through silently if the
+       file isn't registered or doesn't exist on disk. */
+    musicPlay(music, musLib, "title", 1.0f, 1);
 }
 
 static void appShutdown(AppState *app)

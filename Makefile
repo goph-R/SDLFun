@@ -13,7 +13,7 @@ LUA_CFLAGS = -I$(LUA_SRC) -Dluaall_c -DLUA_USE_POSIX
 CXXFLAGS = $(shell sdl-config --cflags) $(BULLET_CXXFLAGS) -I$(LUA_SRC) -O2
 LIBS = $(shell sdl-config --libs) -lGL -lopenal
 
-OBJ = main.o $(BULLET_OBJS) lua.o
+OBJ = main.o $(BULLET_OBJS) lua.o vorbis.o
 
 all: $(BIN)
 
@@ -22,6 +22,12 @@ $(BIN): $(OBJ)
 
 main.o: main.cpp obj_loader.h physics.h sound.h ui.h script.h
 	$(CPP) -c main.cpp -o main.o $(CXXFLAGS)
+
+# stb_vorbis (Ogg Vorbis decoder, public domain). Built as its own C TU
+# so editing main.cpp doesn't pay its recompile cost. music.h includes
+# the same file with STB_VORBIS_HEADER_ONLY for prototypes only.
+vorbis.o: vendor/stb/stb_vorbis.c
+	gcc -x c -c $< -o $@ -O2
 
 bullet_linear_math.o: $(BULLET_SRC)/btLinearMathAll.cpp
 	$(CPP) -c $< -o $@ $(BULLET_CXXFLAGS) -O2

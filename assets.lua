@@ -28,6 +28,17 @@ return {
         },
     },
 
+    -- Streaming Ogg Vorbis tracks for music_play(name [, fade [, loop]]).
+    -- Unlike `sounds`, music isn't preloaded — files are opened lazily on
+    -- the first music_play. "title" is auto-played by the menu on boot;
+    -- name additional tracks (ambient, combat, etc.) and trigger them
+    -- from on_start or scripted events. Drop .ogg files in assets/music/.
+    music = {
+        title   = "assets/music/title.ogg",
+        ambient = "assets/music/ambient_loop.ogg",
+        -- combat  = "assets/music/combat_loop.ogg",
+    },
+
     models = {
         mrfixit         = "assets/models/mrfixit.iqm",
         office_desk     = "assets/models/office-desk.obj",

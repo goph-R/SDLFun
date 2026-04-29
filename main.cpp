@@ -24,6 +24,7 @@ static void conLogf(const char *fmt, ...);
 #include "texture.h"
 #include "ui.h"
 #include "sound.h"
+#include "music.h"
 #include "iqm.h"
 #include "asset_registry.h"
 #include "entity.h"
@@ -682,6 +683,15 @@ int main(int argc, char *argv[])
        (further down, after UI + entities exist). sndLib is empty until
        then — nothing tries to play before the main loop. */
 
+    /* Streaming music subsystem — separate AL sources from the SFX pool,
+       crossfade-capable, lives at app scope so menu/game transitions
+       don't tear it down. Library is name->path; .ogg files are opened
+       lazily by musicPlay. */
+    MusicSystem mus;
+    musicInit(&mus);
+    MusicLibrary musLib;
+    musicLibInit(&musLib);
+
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -753,14 +763,14 @@ int main(int argc, char *argv[])
     AssetRegistry assetReg;
     assetRegInit(&assetReg);
     ScriptSystem script;
-    scriptInit(&script, &ui, &snd, &sndLib, NULL, &assetReg);
+    scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, NULL, &assetReg);
     scriptLoadAssets(&script, "assets.lua");
     scriptInstallConsolePrint(&script);  /* override Lua print → console */
 
     /* App state machine. Starts in MODE_MENU with the MainMenu pushed and
        no Game yet — New Game triggers the first gameInit. */
     AppState app;
-    appInit(&app, SCREEN_W, SCREEN_H, &ui, &assetReg, &script, &snd, &sndLib);
+    appInit(&app, SCREEN_W, SCREEN_H, &ui, &assetReg, &script, &snd, &sndLib, &mus, &musLib);
 
     /* Game struct is allocated once on the stack; gameInited tracks
        whether it currently holds an active session (so gameFree only
@@ -784,6 +794,11 @@ int main(int argc, char *argv[])
         lastTime = now;
 
         uiUpdateMessage(&ui, dt);
+
+        /* Stream music regardless of mode — runs through menus, console
+           pause, and the synchronous gameInit below (the ring's lookahead
+           absorbs the load stall). */
+        musicUpdate(&mus, dt);
 
         if (app.mode == MODE_MENU) {
             menuTick(&app, dt);
@@ -1157,6 +1172,7 @@ int main(int argc, char *argv[])
     scriptShutdown(&script);
     uiShutdown(&ui);
 
+    musicShutdown(&mus);
     sndLibShutdown(&sndLib);
     sndShutdown(&snd);
     SDL_Quit();

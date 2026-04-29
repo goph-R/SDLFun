@@ -81,6 +81,17 @@ if exist %OBJDIR%\lua.o (
 )
 
 REM ----------------------------------------------------------------
+REM  stb_vorbis (cached — delete raw\obj\vorbis.o to force rebuild)
+REM ----------------------------------------------------------------
+if exist %OBJDIR%\vorbis.o (
+    echo Skipping stb_vorbis ^(vorbis.o cached^)
+) else (
+    echo Compiling stb_vorbis...
+    %GCC% -O2 -c vendor\stb\stb_vorbis.c -o %OBJDIR%\vorbis.o
+    if errorlevel 1 goto error
+)
+
+REM ----------------------------------------------------------------
 REM  Compile main
 REM ----------------------------------------------------------------
 echo Compiling SDL main stub...
@@ -95,7 +106,7 @@ REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-%GPP% %OBJDIR%\main.o %OBJDIR%\sdl_main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
+%GPP% %OBJDIR%\main.o %OBJDIR%\sdl_main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o %OBJDIR%\vorbis.o -o SDLFun_w10.exe -Lvendor_win10\lib -lmingw32 -lSDL -lopengl32 -lOpenAL32 -static-libgcc -static-libstdc++
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
