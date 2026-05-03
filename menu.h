@@ -275,7 +275,9 @@ static void menuDrawCoverBg(AppState *app, const char *name, UiColor fallback)
     GLuint tex = appGetMenuTex(app, name, GL_CLAMP_TO_EDGE);
     if (!tex) { uiQuad(full, fallback); return; }
 
-    float srcAspect = 16.0f / 9.0f;
+    /* 2:1 because the bg PNGs are 256x128 — POT-sized so the GeForce 4 MX
+       (no GL_ARB_texture_non_power_of_two) accepts them. */
+    float srcAspect = 2.0f / 1.0f;
     float dstAspect = vw / vh;
     float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
     if (dstAspect > srcAspect) {
