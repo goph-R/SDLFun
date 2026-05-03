@@ -9,6 +9,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO_THREAD_SAFE
+#define STBI_NO_THREAD_LOCALS
 #include "vendor/stb/stb_image.h"
 
 #ifndef GL_CLAMP_TO_EDGE
