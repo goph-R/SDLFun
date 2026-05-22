@@ -31,6 +31,7 @@ struct Game {
     EntityList  *entities;    /* heap-allocated (~4MB); freed by gameFree */
     PhysWorld    phys;
     NavGraph     nav;
+    PathTable    paths;       /* platform motion paths (see path.h) */
     DynLightmap  dynLm;
     int          hasDynLm;
     TexCache     texCache;
@@ -73,6 +74,11 @@ static int gameInit(Game *g,
     script->entities = g->entities;  /* Rewire script to this game's list. */
 
     entLoadFile(g->entities, levelEnt, &g->texCache, assetReg);
+
+    /* Build the platform path table BEFORE the collider-build loop so leader
+       auto-snap (move leader to its path's node 0) has happened by the time
+       we construct kinematic bodies. */
+    pathTableBuild(&g->paths, g->entities);
 
     float spawnX = 0.0f, spawnY = 2.0f, spawnZ = 0.0f;
     if (g->entities->playerIndex >= 0) {
@@ -140,6 +146,16 @@ static int gameInit(Game *g,
             e->door.lcz = lcz;
             e->physBody = physAddKinematicBox(&g->phys, wc, he, e->rotY);
             conLogf("entity: %s door (kinematic box %.2fx%.2fx%.2f)\n",
+                   e->name, hx*2, hy*2, hz*2);
+        } else if (e->type == ENT_PLATFORM) {
+            /* Cache local-space AABB center so updatePlatforms() can
+               recompute the world collider center each frame after the
+               platform's rotation/translation changes. */
+            e->platform.lcx = lcx;
+            e->platform.lcy = lcy;
+            e->platform.lcz = lcz;
+            e->physBody = physAddKinematicBox(&g->phys, wc, he, e->rotY);
+            conLogf("entity: %s platform (kinematic box %.2fx%.2fx%.2f)\n",
                    e->name, hx*2, hy*2, hz*2);
         } else {
             e->physBody = physAddStaticBox(&g->phys, wc, he, e->rotY);

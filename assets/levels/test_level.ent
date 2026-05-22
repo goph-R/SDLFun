@@ -39,6 +39,20 @@ trigger rotate_trigger - 2 1 -1 0  size=1.5,2,1.5 target=rotate_door_01 once=0
 # Test trigger near the ramp
 trigger ramp_zone - 11 1 0 0 size=3,3,3 target=mrfixit_02 once=0
 
+# Path-following lift (docs/PLAN_PATH_PLATFORMS.md).
+# 3-node L-path: rises 3m up, then 3m forward along +X. Two-entity group
+# (floor slab + small sibling marker on top) to exercise sibling carrying
+# and face_path rotation. Starts disabled — walk into lift_trigger to start.
+path_node lift1_p0 lift1_path - 6 0  3 0 order=0
+path_node lift1_p1 lift1_path - 6 3  3 0 order=1
+path_node lift1_p2 lift1_path - 9 3  3 0 order=2
+
+platform lift1_floor lift1 - 6 0 3 0 mesh=door tex=wood1 collide=box \
+    path=lift1_path move=ping_pong speed=1.5 enabled=0 face_path=1
+platform lift1_mark  lift1 - 6 1 3 0 mesh=crt_monitor tex=office collide=box
+
+trigger lift_trigger - 4 1 3 0 size=1.5,2,1.5 target=lift1 once=1
+
 # Waypoint nodes for the nav graph (Phase 1 of plan-enemies.md).
 # Edges are auto-generated at load via pairwise LOS raycasts. Toggle
 # the debug overlay with N in-game. These are placeholder positions

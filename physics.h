@@ -253,6 +253,26 @@ static int physMoveKinematicBox(PhysWorld *pw, void *bodyPtr, Vec3 center, float
     return 1;
 }
 
+/* Teleport a kinematic body to a new transform with no sweep test. Used by
+   platforms: a rider standing on the box would always block a sweep, so the
+   collider just snaps and the rider is translated separately by
+   updatePlatforms(). */
+static void physSetKinematicBoxTransform(PhysWorld *pw, void *bodyPtr,
+                                         Vec3 center, float rotY)
+{
+    (void)pw;
+    if (!bodyPtr) return;
+    btRigidBody *body = (btRigidBody *)bodyPtr;
+    btTransform t;
+    t.setIdentity();
+    t.setOrigin(btVector3(center.x, center.y, center.z));
+    btQuaternion q;
+    q.setRotation(btVector3(0, 1, 0), rotY * (btScalar)SIMD_PI / 180.0f);
+    t.setRotation(q);
+    ((btDefaultMotionState *)body->getMotionState())->setWorldTransform(t);
+    body->setWorldTransform(t);
+}
+
 /* Static triangle-mesh collider for decorations. Accurate for concave
    shapes (desks with kneeholes, chairs, arches). Pass the entity's
    ObjMesh directly; we copy triangles into a btTriangleMesh, apply

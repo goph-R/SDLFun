@@ -31,6 +31,7 @@ static void conLogf(const char *fmt, ...);
 #include "flashlight.h"
 #include "physics.h"
 #include "nav.h"
+#include "path.h"
 #include "console.h"
 #include "script.h"
 #include "game.h"
@@ -549,6 +550,149 @@ static void renderGun(int flashTimer)
     glPopMatrix();
 }
 
+/* Is the player standing on any kinematic body owned by a platform in the
+   leader's Entity.group? Raycast straight down from the capsule's center;
+   if the closest hit is one of the group's bodies and within capsule
+   half-height + radius + 0.10m, the player is riding. */
+static int playerRidingGroup(PhysWorld *pw, EntityList *el, Entity *leader)
+{
+    if (!pw->ghostObject || !pw->capsuleShape) return 0;
+    btVector3 from = pw->ghostObject->getWorldTransform().getOrigin();
+    float reach = (float)(pw->capsuleShape->getHalfHeight()
+                        + pw->capsuleShape->getRadius()) + 0.10f;
+    btVector3 to = from + btVector3(0, -reach, 0);
+
+    btCollisionWorld::ClosestRayResultCallback cb(from, to);
+    cb.m_collisionFilterMask = btBroadphaseProxy::DefaultFilter;
+    pw->world->rayTest(from, to, cb);
+    if (!cb.hasHit()) return 0;
+
+    for (int i = 0; i < el->count; i++) {
+        Entity *m = &el->entities[i];
+        if (!m->active || m->type != ENT_PLATFORM) continue;
+        if (!m->physBody) continue;
+        if (strcmp(m->group, leader->group) != 0) continue;
+        if ((const btCollisionObject *)m->physBody == cb.m_collisionObject) return 1;
+    }
+    return 0;
+}
+
+/* ---- Platform update ----
+ * Walks each leader platform forward along its path by speed*dt. Computes
+ * a position delta this frame, applies it to the leader, all siblings in
+ * the same Entity.group, and any player riding the group. Collider
+ * transforms are teleported (no sweep) since a standing rider would
+ * always block one.
+ *
+ * Runs BEFORE physStep so the kinematic collider position and (later) the
+ * rider's ghost position both land in the same tick — Bullet's character
+ * controller stepDown then sees the new contact naturally with no popping.
+ *
+ * Step 4 of docs/PLAN_PATH_PLATFORMS.md — translation only. Rotation
+ * (face_path) and carry-the-rider are added in Steps 5–6.
+ */
+static void updatePlatforms(EntityList *el, PathTable *pt, PhysWorld *pw, float dt)
+{
+    if (!el || !pt) return;
+    for (int i = 0; i < el->count; i++) {
+        Entity *e = &el->entities[i];
+        if (!e->active || e->type != ENT_PLATFORM) continue;
+        if (!e->platform.isLeader) continue;
+        if (!e->platform.enabled) continue;
+        if (e->platform.finished) continue;
+
+        PathGroup *pg = pathTableFind(pt, e->platform.pathGroup);
+        if (!pg || pg->nodeCount < 2) continue;
+
+        Vec3 oldPos = pathSample(pg, el, e->platform.segIdx, e->platform.segT);
+        float oldYaw = e->rotY;
+        pathAdvance(pg, e, dt);
+        Vec3 newPos = pathSample(pg, el, e->platform.segIdx, e->platform.segT);
+
+        /* Yaw-only heading along the current segment. Vertical-only segments
+           (no XZ component) preserve the previous heading so an elevator
+           doesn't tip sideways. */
+        float newYaw = oldYaw;
+        if (e->platform.facePath) {
+            Vec3 a = pathSample(pg, el, e->platform.segIdx, 0.0f);
+            Vec3 b = pathSample(pg, el, e->platform.segIdx, 1.0f);
+            float segDx = b.x - a.x, segDz = b.z - a.z;
+            if (e->platform.dir < 0) { segDx = -segDx; segDz = -segDz; }
+            if (segDx*segDx + segDz*segDz > 1e-6f) {
+                float pathYaw = atan2f(segDx, segDz) * 180.0f / (float)M_PI;
+                newYaw = pathYaw + e->platform.rotOffset;
+            }
+        }
+
+        float dx = newPos.x - oldPos.x;
+        float dy = newPos.y - oldPos.y;
+        float dz = newPos.z - oldPos.z;
+        float dyaw = newYaw - oldYaw;
+        if (fabsf(dx) < 1e-6f && fabsf(dy) < 1e-6f && fabsf(dz) < 1e-6f
+            && fabsf(dyaw) < 1e-6f) continue;
+
+        /* Snapshot the rider's pre-move ghost origin so we can rotate their
+           offset from the leader's pivot when the platform yaws. Detection
+           uses the OLD collider position (we haven't moved it yet). */
+        int riding = playerRidingGroup(pw, el, e);
+        btVector3 playerOldOrigin(0, 0, 0);
+        if (riding) playerOldOrigin = pw->ghostObject->getWorldTransform().getOrigin();
+
+        /* Leader transform. */
+        e->posX = newPos.x; e->posY = newPos.y; e->posZ = newPos.z;
+        e->rotY = newYaw;
+        float rad = e->rotY * (float)M_PI / 180.0f;
+        float cs = cosf(rad), sn = sinf(rad);
+        Vec3 lwc;
+        lwc.x = e->posX + (cs * e->platform.lcx + sn * e->platform.lcz);
+        lwc.y = e->posY + e->platform.lcy;
+        lwc.z = e->posZ + (-sn * e->platform.lcx + cs * e->platform.lcz);
+        physSetKinematicBoxTransform(pw, e->physBody, lwc, e->rotY);
+
+        /* Siblings: rotate stored offset by leader's current yaw, place, and
+           yaw siblings by leader's yaw + their captured sibLocalAngle so the
+           cluster rotates rigidly. */
+        for (int j = 0; j < el->count; j++) {
+            Entity *m = &el->entities[j];
+            if (!m->active || m->type != ENT_PLATFORM) continue;
+            if (m->platform.isLeader) continue;
+            if (m->platform.leaderIdx != i) continue;
+
+            m->posX = newPos.x + (cs * m->platform.offX + sn * m->platform.offZ);
+            m->posY = newPos.y +  m->platform.offY;
+            m->posZ = newPos.z + (-sn * m->platform.offX + cs * m->platform.offZ);
+            m->rotY = newYaw + m->platform.sibLocalAngle;
+
+            float mrad = m->rotY * (float)M_PI / 180.0f;
+            float mcs = cosf(mrad), msn = sinf(mrad);
+            Vec3 mwc;
+            mwc.x = m->posX + (mcs * m->platform.lcx + msn * m->platform.lcz);
+            mwc.y = m->posY +  m->platform.lcy;
+            mwc.z = m->posZ + (-msn * m->platform.lcx + mcs * m->platform.lcz);
+            physSetKinematicBoxTransform(pw, m->physBody, mwc, m->rotY);
+        }
+
+        /* Carry the rider: rotate their offset from the leader's pivot by
+           dyaw, then translate by the position delta. Mouse-look yaw is
+           intentionally NOT touched — that would fight the player's view.
+           Source-engine convention: rotating platforms move you around but
+           don't spin your camera. */
+        if (riding) {
+            btVector3 leadOld(oldPos.x, oldPos.y, oldPos.z);
+            btVector3 leadNew(newPos.x, newPos.y, newPos.z);
+            btVector3 off = playerOldOrigin - leadOld;
+            float r = dyaw * (float)M_PI / 180.0f;
+            float c = cosf(r), s = sinf(r);
+            btVector3 offRot(c * off.x() + s * off.z(),
+                             off.y(),
+                            -s * off.x() + c * off.z());
+            btTransform t = pw->ghostObject->getWorldTransform();
+            t.setOrigin(leadNew + offRot);
+            pw->ghostObject->setWorldTransform(t);
+        }
+    }
+}
+
 /* ---- Door update ----
  * Advances each opening/closing door by speed*dt along its path. Asks the
  * physics layer to sweep its kinematic body from current to target; if the
@@ -983,6 +1127,10 @@ int main(int argc, char *argv[])
             game.footstepTimer = 0;
         }
 
+        /* Platforms move before physStep so the kinematic collider position
+           and (Step 6) the carried-rider ghost both land in the same tick. */
+        updatePlatforms(game.entities, &game.paths, &game.phys, dt);
+
         physStep(&game.phys, dt);
 
         Vec3 ppos = physGetPlayerPos(&game.phys);
@@ -1071,7 +1219,10 @@ int main(int argc, char *argv[])
         glColor3f(1.0f, 1.0f, 1.0f);
         entRender(game.entities);
 
-        if (game.debugColliders) physDebugDrawColliders(&game.phys);
+        if (game.debugColliders) {
+            physDebugDrawColliders(&game.phys);
+            pathDebugRender(&game.paths, game.entities);
+        }
         if (game.debugNav) navDebugRender(&game.nav);
 
         renderGun(game.gunFlashTimer);

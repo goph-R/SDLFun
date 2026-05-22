@@ -25,7 +25,15 @@ enum EntityType {
     ENT_SWITCH,
     ENT_TRIGGER,
     ENT_DOOR,
-    ENT_WAYPOINT   /* Pathing node; position-only, no mesh/physics. */
+    ENT_WAYPOINT,  /* Nav node; position-only, no mesh/physics. */
+    ENT_PATH_NODE  /* Platform path waypoint; grouped + ordered, position-only. */
+};
+
+/* Path motion modes — stored as int in Entity.platform.moveType to keep
+   the union POD-trivial across Dev-C++ / GCC 3.4. */
+enum PathMoveType {
+    PATH_ONCE      = 0,
+    PATH_PING_PONG = 1
 };
 
 /* ---- Entity ---- */
@@ -76,9 +84,32 @@ struct Entity {
         } enemy;
 
         struct {
-            float startY, endY;
-            float speed;
-            int state;      /* 0=at start, 1=to end, 2=at end, 3=to start */
+            char pathGroup[32];   /* name of path_node group this platform follows */
+            int  moveType;        /* PathMoveType: 0=PATH_ONCE, 1=PATH_PING_PONG */
+            float speed;          /* m/s along path */
+            int  enabled;         /* 0=motion paused (collider stays), 1=running */
+            int  facePath;        /* 1=yaw aligns to segment heading, 0=keep authored rotY */
+            float rotOffset;      /* authored rotY at load, added to path-derived yaw */
+
+            /* Leader/sibling linkage resolved at gameInit (see path.h). */
+            int  isLeader;
+            int  leaderIdx;       /* entity index of leader (== self if leader) */
+
+            /* Leader-only motion state. */
+            int  segIdx;          /* 0 = between node 0 and node 1 */
+            float segT;           /* 0..1 along current segment */
+            int  dir;             /* +1 forward, -1 reverse */
+            int  finished;        /* PATH_ONCE reached the end */
+
+            /* Sibling offset/yaw captured at gameInit, in leader-local
+               (unrotated) space. Unused on the leader. */
+            float offX, offY, offZ;
+            float sibLocalAngle;  /* sibling.rotY - leader.initialRotY */
+
+            /* Local-space AABB center (post-scale, pre-rotation) so the
+               per-tick collider transform can be recomputed cheaply, like
+               door.lcx/lcy/lcz. Populated by the collider-build loop. */
+            float lcx, lcy, lcz;
         } platform;
 
         struct {
@@ -110,6 +141,10 @@ struct Entity {
             float autoCloseTime;
             float openTimer;
         } door;
+
+        struct {
+            int order;          /* sort key within the path group */
+        } pathNode;
     };
 };
 
@@ -158,11 +193,21 @@ static void entActivate(EntityList *el, const char *target)
         if (!e->active) continue;
         if (strcmp(e->name, target) == 0 || strcmp(e->group, target) == 0) {
             switch (e->type) {
-            case ENT_PLATFORM:
-                /* Toggle platform direction */
-                if (e->platform.state == 0) e->platform.state = 1;
-                else if (e->platform.state == 2) e->platform.state = 3;
+            case ENT_PLATFORM: {
+                /* Only the leader carries motion state. entActivate cascades
+                   by group, so without this guard a target=lift1 cascade
+                   would toggle leader.enabled once per group member. */
+                if (!e->platform.isLeader) break;
+                if (e->platform.finished) {
+                    /* PATH_ONCE replay: reset to start. */
+                    e->platform.segIdx = 0;
+                    e->platform.segT   = 0.0f;
+                    e->platform.dir    = +1;
+                    e->platform.finished = 0;
+                }
+                e->platform.enabled = !e->platform.enabled;
                 break;
+            }
             case ENT_SWITCH:
                 e->sw.state = !e->sw.state;
                 /* Cascade: activate the switch's own target */
@@ -243,11 +288,20 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
         else if (strcmp(tokens[0], "trigger") == 0) type = ENT_TRIGGER;
         else if (strcmp(tokens[0], "door") == 0) type = ENT_DOOR;
         else if (strcmp(tokens[0], "waypoint") == 0) type = ENT_WAYPOINT;
+        else if (strcmp(tokens[0], "path_node") == 0) type = ENT_PATH_NODE;
         else { conLogf("entity: unknown type '%s'\n", tokens[0]); continue; }
 
         int idx = entCreate(el, type);
         if (idx < 0) { conLogf("entity: max entities reached\n"); break; }
         Entity *e = &el->entities[idx];
+
+        /* Per-type defaults that need to land before the key=value loop so
+           an absent key keeps a sensible default. entCreate memsets, which
+           leaves these at 0; ENT_PLATFORM wants enabled=1 by default. */
+        if (type == ENT_PLATFORM) {
+            e->platform.enabled = 1;
+            e->platform.dir = +1;
+        }
 
         /* Name and group ("-" means none) */
         if (strcmp(tokens[1], "-") != 0)
@@ -289,8 +343,13 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
                 else                           e->enemy.speed = v;
             }
             else if (strcmp(key, "sight") == 0) e->enemy.sightRange = (float)atof(value);
-            else if (strcmp(key, "start_y") == 0) e->platform.startY = (float)atof(value);
-            else if (strcmp(key, "end_y") == 0) e->platform.endY = (float)atof(value);
+            else if (strcmp(key, "path") == 0) strncpy(e->platform.pathGroup, value, 31);
+            else if (strcmp(key, "move") == 0) {
+                if (strcmp(value, "ping_pong") == 0) e->platform.moveType = PATH_PING_PONG;
+                else                                 e->platform.moveType = PATH_ONCE;
+            }
+            else if (strcmp(key, "enabled") == 0) e->platform.enabled = atoi(value);
+            else if (strcmp(key, "face_path") == 0) e->platform.facePath = atoi(value);
             else if (strcmp(key, "target") == 0) {
                 if (type == ENT_SWITCH) strncpy(e->sw.target, value, 31);
                 else if (type == ENT_TRIGGER) strncpy(e->trigger.target, value, 31);
@@ -299,6 +358,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
                 sscanf(value, "%f,%f,%f", &e->trigger.sizeX, &e->trigger.sizeY, &e->trigger.sizeZ);
             }
             else if (strcmp(key, "once") == 0) e->trigger.once = atoi(value);
+            else if (strcmp(key, "order") == 0) e->pathNode.order = atoi(value);
             else if (strcmp(key, "collide") == 0) {
                 if (strcmp(value, "box") == 0) e->collide = 1;
                 else if (strcmp(value, "trimesh") == 0) e->collide = 2;
@@ -415,21 +475,10 @@ static void entUpdate(EntityList *el, float playerX, float playerY, float player
             }
             break;
 
-        case ENT_PLATFORM:
-            if (e->platform.state == 1) {
-                e->posY += e->platform.speed * dt;
-                if (e->posY >= e->platform.endY) {
-                    e->posY = e->platform.endY;
-                    e->platform.state = 2;
-                }
-            } else if (e->platform.state == 3) {
-                e->posY -= e->platform.speed * dt;
-                if (e->posY <= e->platform.startY) {
-                    e->posY = e->platform.startY;
-                    e->platform.state = 0;
-                }
-            }
-            break;
+        /* ENT_PLATFORM is advanced by updatePlatforms() in main.cpp, not here.
+           It needs the PathTable (held by Game) and the PhysWorld to apply
+           collider transforms and rider carrying — both outside entity.h's
+           scope. */
 
         default:
             break;
