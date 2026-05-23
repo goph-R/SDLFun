@@ -1,8 +1,10 @@
-# SDLFun
+# SOOB Engine
 
 A small FPS engine targeting everything from Windows 98 (Pentium 4, SDL 1.2, fixed-function OpenGL) through modern Linux and Windows. Bullet Physics, OpenAL Soft, header-only modules, no shaders.
 
-![SDLFun running on Windows 10](docs/screenshot.jpg)
+The name is an acronym for the four foundation libraries the engine is built on: **S**DL + **O**penGL + **O**penAL + **B**ullet. (Working title was *SDLFun* — the binaries and the in-tree level still carry that name.)
+
+![SOOB Engine running on Windows 10](docs/screenshot.jpg)
 
 ## Building
 
