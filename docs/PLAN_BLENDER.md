@@ -332,33 +332,37 @@ For `trigger` objects, `size=sx,sy,sz` is read from `obj.scale * 2`
 Same incremental approach we used for path platforms — each step
 builds something testable.
 
-1. **Skeleton**: `bl_info`, `register/unregister`, empty operator under
-   `File > Export > SOOB Level`. Verify the addon installs and shows up.
-2. **Common property group** + N-panel with `type` dropdown only.
-   Verify the panel appears on objects and the dropdown sticks.
-3. **OBJ + MTL writer** (no bake, no entities). Take the active mesh,
-   write `<name>.obj` + `.mtl` with `# tile_scale` etc. Diff against
-   `assets/levels/test_level.obj`.
-4. **Lightmap bake** — per-material bake driven by `objBuildSectors`-
-   compatible material assignments. Bake `test_level.blend` and verify
-   the in-engine render matches the hand-baked version.
-5. **Entity property groups** + type-specific subpanels. Hook up all 11
-   types but emit nothing yet.
-6. **`.ent` writer** — one type at a time, validate against
-   `entLoadFile` by running the engine after each.
-7. **Viewport overlays** — path polylines first (most useful), then
-   trigger boxes, then per-type icons.
-8. **Asset copy** — opt-in pass that walks `assets.lua` and copies
-   referenced files only when missing at the destination.
-9. **Round-trip** — manual test: export the current `test_level.blend`
-   to a sandbox dir, run the engine pointed at it, verify identical
-   behavior to in-tree assets.
-10. **Importer** (optional, Phase 2): read `.obj`/`.ent` back into
+1. **Skeleton** *(done)*: `bl_info`, `register/unregister`, empty
+   operator under `File > Export > SOOB Level`.
+2. **Common property group** + Object Properties panel with the `type`
+   dropdown *(done)*.
+3. **OBJ + MTL writer** *(done)*. Custom Wavefront writer, dedup on
+   `vt`/`vn` keyed on rounded printed values, polygons emitted as-is
+   (engine parser fan-triangulates on load). MTL emits `map_Kd`,
+   `# lm_map`, `# tile_scale`, `# tile_offset`, `# alpha_test` driven
+   by Mapping nodes + material custom properties.
+4. **Lightmap bake** *(done)*. Per-material Cycles bake. Auto-creates
+   `Lightmap` UV layer (Smart UV Project, 0.04 margin), inserts a
+   disconnected `_SOOB_LM` Image Texture node per material, runs
+   Diffuse > Direct + Indirect, saves each as `<material>_lm.png`.
+5. **Entity property groups + subpanels** *(done)*. 8 nested
+   PropertyGroups (common, item, enemy, platform, switch, trigger,
+   door, path_node) mirror the entity.h schema. Single panel dispatches
+   on `soob.type` to draw the right fields.
+6. **`.ent` writer** *(done)*. One write helper per type; emits only
+   non-default keys; trigger size from `obj.scale` (half-extents per
+   `entity.h:465`); path_nodes sorted ahead of platforms in output.
+7. **Viewport overlays** *(done)*. GPU draw handler renders path-group
+   polylines (cyan), leader arrows (magenta), trigger boxes (yellow),
+   path-node octahedra. Toggle via SOOB N-panel checkbox.
+8. **Asset copy** *(done)*. Opt-in dialog flag; parses `assets.lua`
+   via minimal regex parser, resolves `mesh=`/`tex=`/`iqm=` logical
+   names, copies missing files (never clobbers existing).
+9. **Round-trip** — manual procedure. See
+   `docs/verify-blender-plugin.md` §"Round-trip (Step 9)" for the full
+   acceptance test.
+10. **Importer** *(optional, Phase 2)*: read `.obj`/`.ent` back into
     Blender as a scene with `soob_*` properties populated.
-
-Build verification after each step is "the engine still loads
-`test_level.ent` and runs". The addon itself has no compile step — it
-loads or it doesn't.
 
 ## Files touched / created
 
@@ -415,6 +419,13 @@ loads or it doesn't.
 - **Asset copy can clobber registered assets.** Mitigate by only
   copying to `assets/models/` or `assets/textures/` when the
   destination file doesn't already exist (see step 7).
+
+## Verification
+
+The shakedown checklist for the v1 addon lives in
+`docs/verify-blender-plugin.md`. Run through it whenever the addon
+gains new behavior; each item is independent so partial verification
+is meaningful.
 
 ## Non-goals
 

@@ -9,10 +9,11 @@ Installation:
     Pick this file, enable "SOOB Engine - Level Exporter".
     The export option appears under File > Export > SOOB Level (.obj).
 
-Status: in-progress. OBJ + MTL writer works for level geometry from the
-active mesh; lightmap bake, entity writers, and viewport overlays land
-in later implementation steps (see PLAN_BLENDER.md §"Implementation
-phases").
+Status: feature-complete on the v1 roadmap (Steps 1-9 of
+docs/PLAN_BLENDER.md). Exports level geometry, per-material Cycles
+lightmaps, entities (.ent), and copies referenced assets. Viewport
+overlays show path-group polylines, leader arrows, trigger boxes,
+and path-node markers in the 3D View, toggled via the SOOB N-panel.
 """
 
 bl_info = {
@@ -31,7 +32,7 @@ import bpy
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.props import (
     EnumProperty, PointerProperty, StringProperty, BoolProperty,
-    IntProperty,
+    IntProperty, FloatProperty,
 )
 from bpy_extras.io_utils import ExportHelper
 
@@ -535,6 +536,546 @@ def _bake_lightmaps(obj, export_dir, resolution, samples, margin, uv_name,
 
 
 # ---------------------------------------------------------------------------
+# Asset copy
+# ---------------------------------------------------------------------------
+#
+# Optional post-export pass that resolves every entity's mesh/tex/iqm
+# reference against assets.lua and copies the source file to the export
+# root. Existing files at the destination are left alone (no clobber)
+# so registered assets stay intact and a re-export doesn't repeatedly
+# overwrite the user's textures.
+
+_ASSETS_LUA_NAME = "assets.lua"
+
+
+def _find_assets_lua(start_dir):
+    """Walk up from start_dir looking for assets.lua. Returns the absolute
+    path or None."""
+    cur = os.path.abspath(start_dir)
+    for _ in range(6):
+        candidate = os.path.join(cur, _ASSETS_LUA_NAME)
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return None
+
+
+def _parse_assets_lua(path):
+    """Minimal Lua parser tailored for assets.lua.
+
+    Recognises top-level table sections (`models = {`, `textures = {`, ...)
+    and `name = "string"` entries inside them. Doesn't try to support the
+    full Lua grammar — anything fancier in assets.lua will simply be
+    ignored. Returns {section: {logical_name: path}}.
+    """
+    import re
+    section_re = re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{')
+    entry_re   = re.compile(
+        r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"([^"]+)"\s*,?'
+    )
+
+    sections = {}
+    current_section = None
+    depth = 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return sections
+
+    for raw in lines:
+        # Strip Lua line comments.
+        line = raw.split("--", 1)[0]
+        # Track brace depth so nested tables don't confuse the section
+        # boundary heuristic.
+        opens  = line.count("{")
+        closes = line.count("}")
+
+        if current_section is None or depth == 1:
+            m = section_re.search(line)
+            if m and depth + opens >= 1:
+                current_section = m.group(1)
+                sections.setdefault(current_section, {})
+
+        if current_section is not None and depth >= 1:
+            m = entry_re.search(line)
+            if m:
+                sections[current_section][m.group(1)] = m.group(2)
+
+        depth += opens - closes
+        if depth <= 1:
+            # Left this section's table — wait for the next section header.
+            if depth < 1:
+                depth = 0
+                current_section = None
+
+    return sections
+
+
+def _resolve_asset(section, logical_or_path):
+    """Look up a logical name in the assets table; falls through to a raw
+    path if the name isn't registered.
+    """
+    if not logical_or_path:
+        return None
+    if logical_or_path in section:
+        return section[logical_or_path]
+    return logical_or_path  # treat as raw path
+
+
+def _copy_asset(src_root, dst_root, rel_path, copied):
+    """Copy src_root/rel_path -> dst_root/rel_path if missing. Records
+    the action in `copied` for the toast log.
+    """
+    import shutil
+    src = os.path.normpath(os.path.join(src_root, rel_path))
+    dst = os.path.normpath(os.path.join(dst_root, rel_path))
+    if not os.path.isfile(src):
+        print("[soob] asset copy: source missing, skipped: %s" % src)
+        return
+    if os.path.isfile(dst):
+        print("[soob] asset copy: destination exists, skipped: %s" % rel_path)
+        return
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+    except OSError:
+        pass
+    shutil.copy2(src, dst)
+    copied.append(rel_path)
+    print("[soob] asset copy: %s" % rel_path)
+
+
+def _copy_referenced_assets(scene_objects, src_root, dst_root):
+    """Walk every entity, resolve mesh/tex/iqm via assets.lua, copy each
+    missing file into the export tree. Returns list of relative paths
+    copied (for the toast log).
+    """
+    assets_path = _find_assets_lua(src_root)
+    if assets_path is None:
+        print("[soob] asset copy skipped: no assets.lua found near %s" % src_root)
+        return []
+
+    parsed = _parse_assets_lua(assets_path)
+    models   = parsed.get("models",   {})
+    textures = parsed.get("textures", {})
+
+    repo_root = os.path.dirname(assets_path)
+    copied = []
+    seen = set()  # don't try to copy the same file twice in one export
+
+    for obj in scene_objects:
+        if obj.soob.type == "none":
+            continue
+        common = obj.soob.common
+        for value, table in (
+            (common.mesh, models),
+            (common.iqm,  models),
+            (common.tex,  textures),
+        ):
+            if not value:
+                continue
+            resolved = _resolve_asset(table, value)
+            if not resolved or resolved in seen:
+                continue
+            seen.add(resolved)
+            _copy_asset(repo_root, dst_root, resolved, copied)
+
+    return copied
+
+
+# ---------------------------------------------------------------------------
+# Viewport overlays
+# ---------------------------------------------------------------------------
+#
+# GPU draw handler that renders entity gizmos in world space:
+#   - path-group polylines (cyan) sorted by path_node.order
+#   - magenta forward arrow on each platform leader, pointing at its
+#     first path node (mirrors pathDebugRender in the engine)
+#   - yellow translucent box around each trigger, sized by obj.scale * 2
+#   - small per-entity icon markers (typed colored octahedrons)
+#
+# Toggled via a BoolProperty on the Scene; the N-panel in the 3D View
+# exposes the checkbox. The handler is registered/unregistered with the
+# addon, and the toggle just gates the actual draw work.
+
+_DRAW_HANDLER = [None]  # mutable cell so register() can stash + clear it
+
+
+def _gpu_imports():
+    """Lazy-import gpu + gpu_extras so the addon loads even when blender
+    is running headless without a gpu module (rare, but cleaner failure).
+    """
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    return gpu, batch_for_shader
+
+
+def _overlay_collect_paths(scene):
+    """Return {group_name: [(world_pos, order, obj), ...]} grouped by
+    path_node.group and sorted by order within each group.
+    """
+    groups = {}
+    for obj in scene.objects:
+        if obj.soob.type != "path_node":
+            continue
+        group = obj.soob.common.group or "-"
+        groups.setdefault(group, []).append(
+            (obj.matrix_world.to_translation(),
+             obj.soob.path_node.order, obj)
+        )
+    for group in groups:
+        groups[group].sort(key=lambda t: (t[1], t[2].name))
+    return groups
+
+
+def _overlay_collect_triggers(scene):
+    """Return [(center_world, half_extents)] for each trigger entity."""
+    out = []
+    for obj in scene.objects:
+        if obj.soob.type != "trigger":
+            continue
+        center = obj.matrix_world.to_translation()
+        sx = abs(obj.scale[0])
+        sy = abs(obj.scale[1])
+        sz = abs(obj.scale[2])
+        out.append((center, (sx, sy, sz)))
+    return out
+
+
+def _overlay_box_lines(center, half):
+    """Generate 24 line endpoints (12 edges) for an axis-aligned box."""
+    cx, cy, cz = center[0], center[1], center[2]
+    hx, hy, hz = half
+    # 8 corners
+    c = [
+        (cx-hx, cy-hy, cz-hz), (cx+hx, cy-hy, cz-hz),
+        (cx+hx, cy+hy, cz-hz), (cx-hx, cy+hy, cz-hz),
+        (cx-hx, cy-hy, cz+hz), (cx+hx, cy-hy, cz+hz),
+        (cx+hx, cy+hy, cz+hz), (cx-hx, cy+hy, cz+hz),
+    ]
+    edges = [
+        (0,1),(1,2),(2,3),(3,0),     # bottom
+        (4,5),(5,6),(6,7),(7,4),     # top
+        (0,4),(1,5),(2,6),(3,7),     # verticals
+    ]
+    lines = []
+    for a, b in edges:
+        lines.append(c[a])
+        lines.append(c[b])
+    return lines
+
+
+def _overlay_collect_platform_leaders(scene, path_groups):
+    """For each platform whose `path` field references a known group,
+    return (platform_world_pos, first_node_world_pos) for the leader
+    arrow. Multiple platforms can share a group; only the first one
+    seen wins (matches the engine's leader-picking convention).
+    """
+    seen_groups = set()
+    out = []
+    for obj in scene.objects:
+        if obj.soob.type != "platform":
+            continue
+        group = obj.soob.platform.path
+        if not group or group not in path_groups or group in seen_groups:
+            continue
+        nodes = path_groups[group]
+        if not nodes:
+            continue
+        seen_groups.add(group)
+        out.append((obj.matrix_world.to_translation(), nodes[0][0]))
+    return out
+
+
+def _overlay_draw():
+    """Draw handler — runs every redraw of every 3D View.
+
+    Cheap on empty scenes; on a level with ~256 entities the batched
+    geometry is a few hundred vertices total, well below anything that
+    would impact viewport FPS.
+    """
+    context = bpy.context
+    scene = context.scene
+    if not getattr(scene, "soob_show_overlays", False):
+        return
+
+    try:
+        gpu, batch_for_shader = _gpu_imports()
+    except ImportError:
+        return  # gpu module unavailable; silently no-op
+
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+    gpu.state.line_width_set(2.0)
+    gpu.state.blend_set("ALPHA")
+
+    # ---- Path polylines + leader arrows ------------------------------
+    path_groups = _overlay_collect_paths(scene)
+    line_pts = []
+    for group, nodes in path_groups.items():
+        for i in range(len(nodes) - 1):
+            line_pts.append(nodes[i][0])
+            line_pts.append(nodes[i + 1][0])
+    if line_pts:
+        batch = batch_for_shader(shader, "LINES", {"pos": line_pts})
+        shader.bind()
+        shader.uniform_float("color", (0.0, 0.85, 1.0, 1.0))  # cyan
+        batch.draw(shader)
+
+    leader_arrows = _overlay_collect_platform_leaders(scene, path_groups)
+    arrow_pts = []
+    for src, dst in leader_arrows:
+        arrow_pts.append(src)
+        arrow_pts.append(dst)
+    if arrow_pts:
+        gpu.state.line_width_set(3.0)
+        batch = batch_for_shader(shader, "LINES", {"pos": arrow_pts})
+        shader.bind()
+        shader.uniform_float("color", (1.0, 0.0, 0.85, 1.0))  # magenta
+        batch.draw(shader)
+        gpu.state.line_width_set(2.0)
+
+    # ---- Trigger boxes (yellow wireframe, ~50% alpha) -----------------
+    triggers = _overlay_collect_triggers(scene)
+    tri_lines = []
+    for center, half in triggers:
+        tri_lines.extend(_overlay_box_lines(center, half))
+    if tri_lines:
+        batch = batch_for_shader(shader, "LINES", {"pos": tri_lines})
+        shader.bind()
+        shader.uniform_float("color", (1.0, 0.9, 0.0, 0.6))  # yellow
+        batch.draw(shader)
+
+    # ---- Path-node markers (small magenta octahedra) ------------------
+    node_lines = []
+    for group, nodes in path_groups.items():
+        for pos, _order, _obj in nodes:
+            r = 0.15
+            cx, cy, cz = pos[0], pos[1], pos[2]
+            # 6-vertex octahedron edges (12 edges, 24 points)
+            tips = [
+                (cx+r, cy,   cz),   (cx-r, cy,   cz),
+                (cx,   cy+r, cz),   (cx,   cy-r, cz),
+                (cx,   cy,   cz+r), (cx,   cy,   cz-r),
+            ]
+            pairs = [
+                (0,2),(0,3),(0,4),(0,5),
+                (1,2),(1,3),(1,4),(1,5),
+                (2,4),(2,5),(3,4),(3,5),
+            ]
+            for a, b in pairs:
+                node_lines.append(tips[a])
+                node_lines.append(tips[b])
+    if node_lines:
+        batch = batch_for_shader(shader, "LINES", {"pos": node_lines})
+        shader.bind()
+        shader.uniform_float("color", (1.0, 0.2, 1.0, 1.0))  # magenta
+        batch.draw(shader)
+
+    # Restore reasonable defaults so we don't bleed state into other
+    # draw callbacks running after us.
+    gpu.state.line_width_set(1.0)
+    gpu.state.blend_set("NONE")
+
+
+class SOOB_PT_view3d_panel(Panel):
+    """N-panel sidebar in the 3D View with overlay + export shortcuts."""
+
+    bl_label       = "SOOB"
+    bl_idname      = "SOOB_PT_view3d_panel"
+    bl_space_type  = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category    = "SOOB"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.prop(scene, "soob_show_overlays", text="Show Entity Overlays",
+                    toggle=True)
+        layout.separator()
+        layout.operator("export_scene.soob_level", text="Export Level",
+                        icon="EXPORT")
+
+
+# ---------------------------------------------------------------------------
+# .ent writer
+# ---------------------------------------------------------------------------
+#
+# One writer per entity type, mirroring entity.h:entLoadFile so a round-
+# tripped file diffs cleanly. Format per the parser:
+#
+#     <type> <name> <group> <posX> <posY> <posZ> <rotY> [key=value ...]
+#
+# Defaults that match the engine's parser defaults are deliberately
+# omitted to keep the output tidy. Float formatter trims trailing zeros
+# so 1.500 -> 1.5, 0.000 -> 0.
+
+def _f(value):
+    """Compact float -> string. Trims trailing zeros after the decimal."""
+    s = "%.3f" % float(value)
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
+def _ent_pos_and_yaw(obj):
+    """Blender world transform -> engine (posX, posY, posZ, rotY).
+
+    Same axis swap as the OBJ writer: X=x, Y=z, Z=-y. Yaw comes from
+    Blender's Z-axis rotation (mapped to engine Y-axis), in degrees.
+    Non-yaw Eulers are deliberately discarded — entities are gravity-
+    aligned in the engine.
+    """
+    loc = obj.matrix_world.to_translation()
+    rot_eul = obj.matrix_world.to_euler("XYZ")
+    import math
+    pos = (loc[0], loc[2], -loc[1])
+    yaw_deg = math.degrees(rot_eul.z)
+    return pos[0], pos[1], pos[2], yaw_deg
+
+
+def _ent_entity_name(obj):
+    common = obj.soob.common
+    if common.name_override:
+        return common.name_override
+    return obj.name
+
+
+def _ent_entity_group(obj):
+    g = obj.soob.common.group
+    return g if g else "-"
+
+
+def _ent_common_keys(obj):
+    """Return list of "key=value" tokens for the shared (common) fields.
+
+    Only emitted when the field's value differs from the engine's parser
+    default. mesh/tex/iqm pass through verbatim (logical names from
+    assets.lua, or raw paths).
+    """
+    common = obj.soob.common
+    keys = []
+    if common.mesh:       keys.append("mesh=" + common.mesh)
+    if common.tex:        keys.append("tex=" + common.tex)
+    if common.iqm:        keys.append("iqm=" + common.iqm)
+    if common.anim:       keys.append("anim=" + common.anim)
+    if common.scale != 1.0:
+        keys.append("scale=" + _f(common.scale))
+    if common.static:     keys.append("static=1")
+    if common.flip_cull:  keys.append("flip_cull=1")
+    if common.anim_speed != 1.0:
+        keys.append("anim_speed=" + _f(common.anim_speed))
+    if common.collide == "box":
+        keys.append("collide=box")
+    elif common.collide == "trimesh":
+        keys.append("collide=trimesh")
+    return keys
+
+
+def _write_ent_line(obj, file):
+    """Emit one .ent line for `obj`. Returns the entity type token, or
+    None if this object isn't an exportable entity (type == 'none').
+    """
+    soob_type = obj.soob.type
+    if soob_type == "none":
+        return None
+
+    name  = _ent_entity_name(obj)
+    group = _ent_entity_group(obj)
+    px, py, pz, ry = _ent_pos_and_yaw(obj)
+    common_keys = _ent_common_keys(obj)
+
+    # Type-specific keys. We use the same "only emit non-default" rule.
+    type_keys = []
+    if soob_type == "item":
+        if obj.soob.item.item_type != "0":
+            type_keys.append("item_type=" + obj.soob.item.item_type)
+    elif soob_type == "enemy":
+        e = obj.soob.enemy
+        if e.health != 100: type_keys.append("health=" + str(e.health))
+        if e.speed  != 3.0: type_keys.append("speed="  + _f(e.speed))
+        if e.sight  != 15.0: type_keys.append("sight=" + _f(e.sight))
+    elif soob_type == "platform":
+        p = obj.soob.platform
+        if p.path:                 type_keys.append("path=" + p.path)
+        if p.move != "once":       type_keys.append("move=" + p.move)
+        if p.speed != 1.5:         type_keys.append("speed=" + _f(p.speed))
+        if not p.enabled:          type_keys.append("enabled=0")
+        if p.face_path:            type_keys.append("face_path=1")
+    elif soob_type == "switch":
+        if obj.soob.switch.target:
+            type_keys.append("target=" + obj.soob.switch.target)
+    elif soob_type == "trigger":
+        t = obj.soob.trigger
+        # Engine stores `size=` as HALF-extents (entity.h:465 checks
+        # `dx > -sx && dx < sx`). The viewport overlay draws a box
+        # of total width 2*scale, so Blender scale=1 displays as a 2m
+        # cube and the .ent gets size=1,1,1 — same visual, same volume.
+        sx = abs(obj.scale[0])
+        sy = abs(obj.scale[2])  # Blender Z = engine Y
+        sz = abs(obj.scale[1])
+        if sx != 0.0 or sy != 0.0 or sz != 0.0:
+            type_keys.append("size=%s,%s,%s" % (_f(sx), _f(sy), _f(sz)))
+        if t.target: type_keys.append("target=" + t.target)
+        if t.once:   type_keys.append("once=1")
+    elif soob_type == "door":
+        d = obj.soob.door
+        if d.motion != "slide": type_keys.append("motion=" + d.motion)
+        if d.axis != "Y":       type_keys.append("axis=" + d.axis)
+        if d.amount != (90.0 if d.motion == "rotate" else 1.0):
+            type_keys.append("amount=" + _f(d.amount))
+        if d.speed != 1.0:      type_keys.append("speed=" + _f(d.speed))
+        if d.auto_close != 0.0: type_keys.append("auto_close=" + _f(d.auto_close))
+    elif soob_type == "path_node":
+        if obj.soob.path_node.order != 0:
+            type_keys.append("order=" + str(obj.soob.path_node.order))
+    # player / waypoint: position-only, no type-specific keys.
+
+    keys = common_keys + type_keys
+    f = file
+    f.write("%s %s %s %s %s %s %s" % (
+        soob_type, name, group, _f(px), _f(py), _f(pz), _f(ry)
+    ))
+    if keys:
+        f.write(" " + " ".join(keys))
+    f.write("\n")
+    return soob_type
+
+
+def _write_ent_file(scene_objects, ent_path):
+    """Write the .ent file. Returns counts per type for the toast log."""
+    # Order: write path_nodes first (so platforms reference an already-
+    # known group), then platforms, then everything else by name. This
+    # matches what `entLoadFile` and `pathTableBuild` expect.
+    type_sort = {
+        "player": 0, "path_node": 1, "waypoint": 2, "platform": 3,
+        "door": 4, "switch": 5, "trigger": 6,
+        "enemy": 7, "item": 8, "decoration": 9,
+    }
+
+    entities = [o for o in scene_objects if o.soob.type != "none"]
+    entities.sort(key=lambda o: (type_sort.get(o.soob.type, 99), o.name))
+
+    counts = {}
+    with open(ent_path, "w", encoding="utf-8") as f:
+        f.write("# Entity definitions, exported by SOOB Engine Blender addon.\n")
+        f.write("# Format: type name group posX posY posZ rotY [key=value ...]\n")
+        f.write("\n")
+        current_type = None
+        for obj in entities:
+            t = obj.soob.type
+            if t != current_type:
+                f.write("# %s entities\n" % t)
+                current_type = t
+            written = _write_ent_line(obj, f)
+            if written is not None:
+                counts[written] = counts.get(written, 0) + 1
+    return counts
+
+
+# ---------------------------------------------------------------------------
 # Property groups
 # ---------------------------------------------------------------------------
 #
@@ -576,12 +1117,179 @@ SOOB_TYPE_ITEMS = (
 )
 
 
+# Nested property groups — one per entity type with type-specific fields.
+# Field names mirror the .ent key=value tokens in entity.h:entLoadFile
+# (search `else if (strcmp(key,`) so the writer in Step 6 can map them
+# 1:1. Defaults match the engine defaults so the writer can skip emitting
+# keys that haven't been touched.
+
+class SOOB_PG_common(PropertyGroup):
+    """Fields shared by every entity (name/group/collider/scale/visual binding)."""
+
+    # `name`/`group` override the derived defaults (obj.name and "-").
+    name_override: StringProperty(
+        name="Name",
+        description="Override the entity name. Blank = use Blender object name",
+        default="",
+    )
+    group: StringProperty(
+        name="Group",
+        description="Optional group for batch activation. Blank = '-'",
+        default="",
+    )
+    collide: EnumProperty(
+        name="Collide",
+        items=(
+            ("none",    "None",    "No physics body"),
+            ("box",     "Box AABB", "Axis-aligned bounding box from mesh"),
+            ("trimesh", "Trimesh", "Exact triangle mesh (slower; use for kneeholes)"),
+        ),
+        default="none",
+    )
+    scale: FloatProperty(
+        name="Scale",
+        description="Uniform scale factor applied to the entity's mesh",
+        default=1.0, min=0.001, soft_max=10.0,
+    )
+    static: BoolProperty(
+        name="Static",
+        description="Include this entity's mesh in the lightmap bake",
+        default=False,
+    )
+    flip_cull: BoolProperty(
+        name="Flip Cull",
+        description="Use GL_FRONT culling (for inside-out meshes)",
+        default=False,
+    )
+
+    # Visual binding — logical names from assets.lua (mesh=, tex=, iqm=).
+    # Unknown names fall through as raw paths.
+    mesh: StringProperty(
+        name="Mesh",
+        description="assets.lua logical name (e.g. 'office_desk') or path. "
+                    "Use for static OBJ props",
+        default="",
+    )
+    tex: StringProperty(
+        name="Texture",
+        description="assets.lua logical name (e.g. 'wood1') or path",
+        default="",
+    )
+    iqm: StringProperty(
+        name="IQM",
+        description="assets.lua logical name for an animated IQM model. "
+                    "Mutually exclusive with Mesh",
+        default="",
+    )
+    anim: StringProperty(
+        name="Initial Anim",
+        description="IQM animation name to start playing on load",
+        default="",
+    )
+    anim_speed: FloatProperty(
+        name="Anim Speed",
+        description="Animation playback rate multiplier",
+        default=1.0, min=0.0, soft_max=4.0,
+    )
+
+
+class SOOB_PG_item(PropertyGroup):
+    item_type: EnumProperty(
+        name="Item Type",
+        items=(
+            ("0", "Health", ""),
+            ("1", "Ammo",   ""),
+            ("2", "Key",    ""),
+        ),
+        default="0",
+    )
+
+
+class SOOB_PG_enemy(PropertyGroup):
+    health: IntProperty(name="Health", default=100, min=1, soft_max=1000)
+    speed: FloatProperty(name="Speed",  default=3.0, min=0.0, soft_max=20.0)
+    sight: FloatProperty(name="Sight Range", default=15.0, min=0.0, soft_max=100.0)
+
+
+class SOOB_PG_platform(PropertyGroup):
+    path: StringProperty(
+        name="Path Group",
+        description="Name of the path_node group this platform follows",
+        default="",
+    )
+    move: EnumProperty(
+        name="Movement",
+        items=(
+            ("once",      "Once",      "Travel from node 0 to last, then stop"),
+            ("ping_pong", "Ping-pong", "Bounce back and forth between endpoints"),
+        ),
+        default="once",
+    )
+    speed: FloatProperty(name="Speed", default=1.5, min=0.0, soft_max=20.0)
+    enabled: BoolProperty(
+        name="Enabled",
+        description="Whether motion is running on load (off = needs a trigger)",
+        default=True,
+    )
+    face_path: BoolProperty(
+        name="Face Path",
+        description="Yaw the platform to align with the current segment heading",
+        default=False,
+    )
+
+
+class SOOB_PG_switch(PropertyGroup):
+    target: StringProperty(name="Target", default="")
+
+
+class SOOB_PG_trigger(PropertyGroup):
+    # Trigger size comes from obj.scale * 2 (1 = 2m box) — no field here.
+    target: StringProperty(name="Target", default="")
+    once: BoolProperty(name="Once", default=False)
+
+
+class SOOB_PG_door(PropertyGroup):
+    motion: EnumProperty(
+        name="Motion",
+        items=(
+            ("slide",  "Slide",  "Translate along axis"),
+            ("rotate", "Rotate", "Rotate around Y axis"),
+        ),
+        default="slide",
+    )
+    axis: EnumProperty(
+        name="Axis",
+        items=(("X", "X", ""), ("Y", "Y", ""), ("Z", "Z", "")),
+        default="Y",
+    )
+    amount: FloatProperty(
+        name="Amount",
+        description="Meters (slide) or degrees (rotate)",
+        default=1.0,
+    )
+    speed: FloatProperty(name="Speed", default=1.0, min=0.0, soft_max=20.0)
+    auto_close: FloatProperty(
+        name="Auto-close (s)",
+        description="Seconds to stay open before auto-closing. 0 = stay open",
+        default=3.0, min=0.0, soft_max=30.0,
+    )
+
+
+class SOOB_PG_path_node(PropertyGroup):
+    order: IntProperty(
+        name="Order",
+        description="Sort key within the path group (0 = first)",
+        default=0, min=0,
+    )
+
+
 class SOOB_PG_entity(PropertyGroup):
     """Per-object SOOB Engine entity properties.
 
-    Type-specific sub-groups (platform / trigger / door / ...) will be
-    nested into this group in later steps. For now only the type
-    discriminator exists.
+    The `type` enum picks one of 11 behaviors; the nested PointerProperty
+    sub-groups hold per-type fields. Sub-groups stay attached to every
+    object regardless of type so switching the dropdown back and forth
+    doesn't lose your values.
     """
 
     type: EnumProperty(
@@ -591,6 +1299,15 @@ class SOOB_PG_entity(PropertyGroup):
         default="none",
     )
 
+    common:    PointerProperty(type=SOOB_PG_common)
+    item:      PointerProperty(type=SOOB_PG_item)
+    enemy:     PointerProperty(type=SOOB_PG_enemy)
+    platform:  PointerProperty(type=SOOB_PG_platform)
+    switch:    PointerProperty(type=SOOB_PG_switch)
+    trigger:   PointerProperty(type=SOOB_PG_trigger)
+    door:      PointerProperty(type=SOOB_PG_door)
+    path_node: PointerProperty(type=SOOB_PG_path_node)
+
 
 # ---------------------------------------------------------------------------
 # UI panels
@@ -599,8 +1316,10 @@ class SOOB_PG_entity(PropertyGroup):
 class SOOB_PT_object_panel(Panel):
     """Object Properties > SOOB Entity panel.
 
-    The dropdown lives here on every object; non-"none" picks will reveal
-    sub-panels for type-specific fields once Step 5 lands.
+    Top-level dropdown picks the entity type; sub-panels reveal type-
+    specific fields. We use one panel with a `draw_type_*` dispatch
+    rather than 11 separate panels — fewer classes to register, and the
+    UI reads as one cohesive section.
     """
 
     bl_label       = "SOOB Entity"
@@ -611,9 +1330,6 @@ class SOOB_PT_object_panel(Panel):
 
     @classmethod
     def poll(cls, context):
-        # Hide the panel on objects Blender doesn't carry data for (lights,
-        # cameras still get it — those will simply stay "none" and be
-        # ignored by the exporter).
         return context.object is not None
 
     def draw(self, context):
@@ -624,6 +1340,72 @@ class SOOB_PT_object_panel(Panel):
 
         if soob.type == "none":
             layout.label(text="Exported as level geometry.", icon="MESH_DATA")
+            return
+
+        # ---- Common fields shown on every entity ------------------
+        common = soob.common
+        col = layout.column(align=True)
+        col.prop(common, "name_override")
+        col.prop(common, "group")
+        col.separator()
+        col.prop(common, "scale")
+        col.prop(common, "static")
+        col.prop(common, "flip_cull")
+        col.prop(common, "collide")
+        # Visual binding only matters for entities that draw a mesh —
+        # waypoints / path_nodes / triggers / players don't.
+        if soob.type in {"decoration", "item", "enemy", "platform",
+                         "switch", "door"}:
+            col.separator()
+            col.label(text="Visual")
+            col.prop(common, "mesh")
+            col.prop(common, "tex")
+            col.prop(common, "iqm")
+            if common.iqm:
+                col.prop(common, "anim")
+                col.prop(common, "anim_speed")
+
+        # ---- Type-specific fields ---------------------------------
+        layout.separator()
+        if soob.type == "item":
+            layout.prop(soob.item, "item_type")
+        elif soob.type == "enemy":
+            col = layout.column(align=True)
+            col.prop(soob.enemy, "health")
+            col.prop(soob.enemy, "speed")
+            col.prop(soob.enemy, "sight")
+        elif soob.type == "platform":
+            col = layout.column(align=True)
+            col.prop(soob.platform, "path")
+            col.prop(soob.platform, "move")
+            col.prop(soob.platform, "speed")
+            col.prop(soob.platform, "enabled")
+            col.prop(soob.platform, "face_path")
+        elif soob.type == "switch":
+            layout.prop(soob.switch, "target")
+        elif soob.type == "trigger":
+            col = layout.column(align=True)
+            col.prop(soob.trigger, "target")
+            col.prop(soob.trigger, "once")
+            col.separator()
+            col.label(text="Trigger half-extent = Object Scale "
+                           "(scale 1 = 2 m cube)",
+                      icon="INFO")
+        elif soob.type == "door":
+            col = layout.column(align=True)
+            col.prop(soob.door, "motion")
+            col.prop(soob.door, "axis")
+            col.prop(soob.door, "amount")
+            col.prop(soob.door, "speed")
+            col.prop(soob.door, "auto_close")
+        elif soob.type == "path_node":
+            layout.prop(soob.path_node, "order")
+        elif soob.type == "waypoint":
+            layout.label(text="Position-only nav node. No extra fields.",
+                         icon="DECORATE_KEYFRAME")
+        elif soob.type == "player":
+            layout.label(text="Spawn position + yaw (rotation Z).",
+                         icon="USER")
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +1469,14 @@ class SOOB_OT_export_level(Operator, ExportHelper):
         default=True,
     )
 
+    copy_assets: BoolProperty(
+        name="Copy Referenced Assets",
+        description="Resolve mesh/tex/iqm logical names via assets.lua and "
+                    "copy the source files into the export tree. Existing "
+                    "files at the destination are left alone",
+        default=False,
+    )
+
     @classmethod
     def poll(cls, context):
         return context.active_object is not None and context.active_object.type == "MESH"
@@ -735,22 +1525,47 @@ class SOOB_OT_export_level(Operator, ExportHelper):
 
         if used_materials:
             _write_mtl(used_materials, mtl_path)
+
+        # ---- .ent writer ---------------------------------------------
+        ent_path = stem + ".ent"
+        ent_counts = _write_ent_file(
+            [o for o in context.scene.objects], ent_path
+        )
+        ent_total = sum(ent_counts.values())
+
+        # ---- Optional asset copy -------------------------------------
+        copied = []
+        if self.copy_assets:
+            # Sources come from the repo containing assets.lua (walked
+            # up from export_dir); destination is the export_dir itself.
+            copied = _copy_referenced_assets(
+                [o for o in context.scene.objects],
+                src_root=export_dir,
+                dst_root=export_dir,
+            )
+
+        suffix = ""
+        if copied:
+            suffix = ", %d assets copied" % len(copied)
+
+        if used_materials:
             self.report(
                 {"INFO"},
-                "SOOB: wrote %s (%d verts, %d faces, %d materials, %d lightmaps)" %
+                "SOOB: wrote %s (%d verts, %d faces, %d materials, "
+                "%d lightmaps, %d entities%s)" %
                 (os.path.basename(obj_path), n_verts, n_faces,
-                 len(used_materials), len(baked)),
+                 len(used_materials), len(baked), ent_total, suffix),
             )
         else:
-            # Single-material / no-material level — engine falls back to
-            # assets/levels/diffuse.png + lightmap.png. Skip MTL entirely.
             self.report(
                 {"INFO"},
-                "SOOB: wrote %s (%d verts, %d faces, no materials)" %
-                (os.path.basename(obj_path), n_verts, n_faces),
+                "SOOB: wrote %s (%d verts, %d faces, no materials, "
+                "%d entities%s)" %
+                (os.path.basename(obj_path), n_verts, n_faces, ent_total, suffix),
             )
 
         print("[soob] export ok -> %s" % obj_path)
+        print("[soob] entities: %s" % ent_counts)
         return {"FINISHED"}
 
 
@@ -759,8 +1574,20 @@ def menu_func_export(self, context):
 
 
 _classes = (
+    # PropertyGroups must be registered before any class that holds a
+    # PointerProperty to them — and the parent group last.
+    SOOB_PG_common,
+    SOOB_PG_item,
+    SOOB_PG_enemy,
+    SOOB_PG_platform,
+    SOOB_PG_switch,
+    SOOB_PG_trigger,
+    SOOB_PG_door,
+    SOOB_PG_path_node,
     SOOB_PG_entity,
+
     SOOB_PT_object_panel,
+    SOOB_PT_view3d_panel,
     SOOB_OT_export_level,
 )
 
@@ -771,15 +1598,39 @@ def register():
     # Property groups must be registered before the pointer that references
     # them. Attach `soob` to every Object so `obj.soob.type` works everywhere.
     bpy.types.Object.soob = PointerProperty(type=SOOB_PG_entity)
+    bpy.types.Scene.soob_show_overlays = BoolProperty(
+        name="Show Entity Overlays",
+        description="Render path lines, trigger boxes, and entity markers "
+                    "in the 3D viewport",
+        default=True,
+    )
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+
+    # Install the world-space draw handler. Stored in a module-level cell
+    # so unregister() can pull it back out — addons that lose track of
+    # their handlers leak draw callbacks across reloads.
+    if _DRAW_HANDLER[0] is None:
+        _DRAW_HANDLER[0] = bpy.types.SpaceView3D.draw_handler_add(
+            _overlay_draw, (), "WINDOW", "POST_VIEW"
+        )
 
 
 def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+
+    if _DRAW_HANDLER[0] is not None:
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLER[0], "WINDOW")
+        except (ValueError, RuntimeError):
+            pass
+        _DRAW_HANDLER[0] = None
+
     # Delete the pointer before unregistering its target class, otherwise
     # Blender complains about a dangling RNA pointer on re-enable.
     if hasattr(bpy.types.Object, "soob"):
         del bpy.types.Object.soob
+    if hasattr(bpy.types.Scene, "soob_show_overlays"):
+        del bpy.types.Scene.soob_show_overlays
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
 
