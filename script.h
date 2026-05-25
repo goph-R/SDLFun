@@ -264,7 +264,7 @@ static int scr_walkStringTable(lua_State *L, ScriptSystem *s,
 
 static void scr_onSound(ScriptSystem *s, const char *name, const char *path)
 {
-    sndLibAdd(s->sndLib, name, sndLoadWav(path));
+    sndLibAdd(s->sndLib, name, sndLoad(path));
 }
 
 /* Walk the manifest's `sounds` subtable. A value can be either a single

@@ -11,6 +11,9 @@
  *   sndShutdown(&sys)          — tear down
  *   sndMakeBuffer(pcm, numSamples, sampleRate) — 16-bit signed mono PCM
  *   sndLoadWav(path)           — 16-bit PCM WAV (mono or stereo→mono mix)
+ *   sndLoadOgg(path)           — .ogg decoded once at load via stb_vorbis
+ *                                (mono or stereo→mono mix)
+ *   sndLoad(path)              — dispatches by ".ogg" / ".wav" extension
  *   sndFreeBuffer(buffer)
  *   sndPlay(&sys, buffer)      — fire-and-forget on any free source
  *
@@ -39,6 +42,13 @@
 
 #include <AL/al.h>
 #include <AL/alc.h>
+
+/* stb_vorbis declarations only — the implementation lives in vorbis.o
+   (compiled separately from vendor/stb/stb_vorbis.c). Same trick music.h
+   uses; both files including the header is safe via stb_vorbis.c's
+   own include guard. */
+#define STB_VORBIS_HEADER_ONLY
+#include "vendor/stb/stb_vorbis.c"
 
 #include "math.h"
 
@@ -132,6 +142,50 @@ static SoundBuffer sndLoadWav(const char *path)
     }
     SDL_FreeWAV(data);
     return out;
+}
+
+/* Load an .ogg as a fully-decoded mono buffer (no streaming — SFX want
+   zero-latency playback). Stereo is downmixed by averaging L/R. Sample
+   rate is passed through and OpenAL handles any resampling. */
+static SoundBuffer sndLoadOgg(const char *path)
+{
+    int channels = 0, sampleRate = 0;
+    short *pcm = NULL;
+    int frames = stb_vorbis_decode_filename(path, &channels, &sampleRate, &pcm);
+    if (frames <= 0 || !pcm) {
+        conLogf("sndLoadOgg: %s: decode failed\n", path);
+        if (pcm) free(pcm);
+        return 0;
+    }
+    SoundBuffer out = 0;
+    if (channels == 1) {
+        out = sndMakeBuffer(pcm, frames, sampleRate);
+    } else if (channels == 2) {
+        short *mono = (short *)malloc((size_t)frames * sizeof(short));
+        for (int i = 0; i < frames; i++) {
+            int l = pcm[i * 2 + 0];
+            int r = pcm[i * 2 + 1];
+            mono[i] = (short)((l + r) / 2);
+        }
+        out = sndMakeBuffer(mono, frames, sampleRate);
+        free(mono);
+    } else {
+        conLogf("sndLoadOgg: %s: unsupported channel count %d\n", path, channels);
+    }
+    free(pcm);
+    return out;
+}
+
+/* Dispatch to the right loader by file extension. Anything that's not
+   ".ogg" / ".OGG" is treated as a WAV. Keeps script-side asset loading
+   format-agnostic. */
+static SoundBuffer sndLoad(const char *path)
+{
+    const char *dot = strrchr(path, '.');
+    if (dot && (strcmp(dot, ".ogg") == 0 || strcmp(dot, ".OGG") == 0)) {
+        return sndLoadOgg(path);
+    }
+    return sndLoadWav(path);
 }
 
 /* ---- Named registry ----
