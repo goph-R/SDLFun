@@ -36,6 +36,7 @@ static void conLogf(const char *fmt, ...);
 #include "script.h"
 #include "game.h"
 #include "menu.h"
+#include "config.h"
 
 #define SAMPLE_RATE 44100
 
@@ -771,19 +772,16 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
 
 int main(int argc, char *argv[])
 {
-    /* Parse -w <width>, -h <height>, -fullscreen. Anything else ignored. */
-    int wSpecified = 0, hSpecified = 0, fullscreen = 0;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
-            SCREEN_W = atoi(argv[++i]);
-            wSpecified = 1;
-        } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
-            SCREEN_H = atoi(argv[++i]);
-            hSpecified = 1;
-        } else if (strcmp(argv[i], "-fullscreen") == 0) {
-            fullscreen = 1;
-        }
-    }
+    /* Display config: built-in defaults → config.lua → CLI args → clamp.
+       Width/height of 0 is a sentinel for "use desktop resolution",
+       resolved below once SDL knows the desktop size. */
+    Config cfg = configLoadDefaults();
+    configLoadFromFile(&cfg, "config.lua");
+    configApplyArgs(&cfg, argc, argv);
+    configClamp(&cfg);
+    SCREEN_W = cfg.width;
+    SCREEN_H = cfg.height;
+    int fullscreen = cfg.fullscreen;
 
     /* Sample the configured desktop refresh rate BEFORE SDL touches the
        display, so later we can reapply it over SDL's fullscreen mode
@@ -799,18 +797,23 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* If fullscreen with no explicit size, fill any unspecified dimension
-       with the desktop resolution. SDL_GetVideoInfo()->current_w/h returns
-       the desktop size BEFORE SDL_SetVideoMode has been called (SDL 1.2.10+). */
+    /* Resolve the "0 = desktop" sentinel for fullscreen mode.
+       SDL_GetVideoInfo()->current_w/h returns the desktop size BEFORE
+       SDL_SetVideoMode has been called (SDL 1.2.10+). */
     if (fullscreen) {
         const SDL_VideoInfo *vi = SDL_GetVideoInfo();
         if (vi) {
-            if (!wSpecified) SCREEN_W = vi->current_w;
-            if (!hSpecified) SCREEN_H = vi->current_h;
+            if (SCREEN_W == 0) SCREEN_W = vi->current_w;
+            if (SCREEN_H == 0) SCREEN_H = vi->current_h;
         }
     }
-    if (SCREEN_W < 320) SCREEN_W = 320;
-    if (SCREEN_H < 240) SCREEN_H = 240;
+    /* Final clamp: catches any 0-sentinel that survived (e.g. windowed
+       mode with width=0 in config.lua, or SDL_GetVideoInfo returning
+       NULL) and any out-of-range desktop value. */
+    if (SCREEN_W < CONFIG_W_MIN) SCREEN_W = CONFIG_W_MIN;
+    if (SCREEN_W > CONFIG_W_MAX) SCREEN_W = CONFIG_W_MAX;
+    if (SCREEN_H < CONFIG_H_MIN) SCREEN_H = CONFIG_H_MIN;
+    if (SCREEN_H > CONFIG_H_MAX) SCREEN_H = CONFIG_H_MAX;
     conLogf("Resolution: %dx%d%s (V-FOV %.1f deg for %d deg H-FOV)\n",
            SCREEN_W, SCREEN_H, fullscreen ? " fullscreen" : "",
            computeVFov(), (int)H_FOV_DEG);
