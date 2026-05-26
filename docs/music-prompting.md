@@ -143,6 +143,100 @@ forward momentum, no triumph
 Chained back-to-back: wonder → dread → catastrophe → flight. Each beat
 is a separate generation, crossfade at the cuts.
 
+## Climactic — "the hardest fight in the game"
+
+The finale boss cue. Scales *up* from the disaster — bigger forces,
+melodic content (not just texture), heroic intervals, and a clear sense
+that this is *the* fight. The trap to avoid is "epic" (which pulls
+modern Zimmer braam) — better target words: **climactic**, **decisive**,
+**final stand**, **everything-on-the-line**.
+
+```
+Climactic orchestral battle cue — same late-70s / early-80s sci-fi
+cinematic palette established earlier, now at its biggest. Full
+orchestra at the limit: heroic brass calls in perfect fifths and
+octaves, driving low-string ostinato at ~120 BPM, urgent woodwind
+runs, sweeping melodic violins in mid-to-high register — sweeping,
+never shrieking. Timpani and bass drum hits anchor each phrase,
+crash cymbals on the peaks. Modal harmony with a memorable recurring
+phrase in the horns — the score's main theme stated through gritted
+teeth. Sense of "this is the one we either win or die." Dynamic peaks
+with brief moments of breath before re-engaging. 2-3 minute piece.
+No drum kit, no electronic synths, no vocals. Acoustic orchestral
+recording with weight and reverb.
+```
+
+### Why this works
+
+- **"Now at its biggest"** — directly tells the model this is the
+  loudest cue in the family, scaling up from disaster.
+- **"Heroic brass in perfect fifths and octaves"** — these are the
+  *heroic* intervals (open horn fanfares). The disaster cue used
+  dissonance; the finale uses these as triumphant declarations.
+- **"~120 BPM"** — faster than the disaster (90), more forward thrust
+  without going cartoonish.
+- **"Sweeping … never shrieking"** — explicit guard against the harsh
+  high-string problem the disaster cue had.
+- **"The score's main theme stated through gritted teeth"** — primes
+  the AI to write something that *feels* like it's referencing earlier
+  material, even though there's no actual established theme yet. Gives
+  that "everything coming together" feeling for free.
+- **"Dynamic peaks with brief moments of breath"** — hints at structure.
+  Generators don't really build long-form arcs reliably, but this
+  phrasing nudges them to vary intensity rather than running flat-out
+  for 3 minutes.
+
+### Variants
+
+**Add a wordless choir** (the traditional climactic move — Star Trek
+TMP, ROTJ, Conan):
+```
+add: wordless orchestral choir holding open chords behind the brass,
+wide stereo placement, used sparingly on the biggest peaks only,
+"aah" syllable not lyrics
+```
+This breaks the no-vocals streak from earlier cues, but for the climax
+specifically it's the established cinematic language. Listening next
+to the calm/disaster cues, the choir says "this one matters more".
+
+**More desperate, less heroic** (if the boss is a cosmic horror you're
+barely surviving):
+```
+swap: heroic brass calls in perfect fifths → anguished brass calls in
+minor and tritones; replace "main theme stated through gritted teeth"
+with "fragmented theme — the hero's motif breaking and being
+re-attacked between explosions"
+```
+
+**Two-phase structure** (recommended for actual in-game use, since
+music gen rarely sustains a 5-min arc):
+- **Phase 1** — the main prompt above, "we can win this".
+- **Phase 2** — desperate middle: `same palette but pulled back —
+  sparse, just low strings and timpani heartbeat, single brass call
+  distant, sense of regrouping under fire, ~80 BPM`.
+- **Phase 3** — same as Phase 1 but with `final-push intensity, last
+  reserves, breakthrough cadence at the end`.
+
+Crossfade between them based on boss health stages. Most "hardest
+fight" music in games works this way — the music tracks the player's
+progress, not real time.
+
+### Iteration notes
+
+- If it comes out **too generic-blockbuster**, replace `Full orchestra
+  at the limit` with `Disciplined full orchestra — every voice present
+  but never crowded`. Keeps the size while preserving the
+  late-70s/80s clarity (vs. modern wall-of-sound).
+- If it comes out **too thin**, add `with section doublings — first
+  and second violins in octaves, horns paired with cellos`. Concrete
+  instrumentation tricks beat asking for "thicker".
+- **"Triumph"** is dangerous as a word — generators interpret it as the
+  final fanfare, which is wrong for *during* the fight. Use
+  **"defiance"** instead if you want that energy mid-piece.
+- **Length:** this is the one place where asking for ~3 minutes is
+  worth it. Climactic music needs room. If the tool caps you shorter,
+  generate two pieces and stitch.
+
 ## Iteration notes
 
 - **Transition between cues:** if you generate at compatible tempos
