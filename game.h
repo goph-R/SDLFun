@@ -71,7 +71,7 @@ static int gameInit(Game *g,
 
     g->entities = (EntityList *)malloc(sizeof(EntityList));
     entListInit(g->entities);
-    script->entities = g->entities;  /* Rewire script to this game's list. */
+    scriptExtSetEntities(g->entities);  /* Wire ent_activate to this list. */
 
     entLoadFile(g->entities, levelEnt, &g->texCache, assetReg);
 
@@ -204,7 +204,7 @@ static void gameFree(Game *g, ScriptSystem *script)
         free(g->entities);
         g->entities = NULL;
     }
-    if (script) script->entities = NULL;
+    scriptExtSetEntities(NULL);
 
     if (g->hasDynLm) { dynLmFree(&g->dynLm); g->hasDynLm = 0; }
     texCacheFree(&g->texCache);

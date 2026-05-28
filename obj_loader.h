@@ -5,7 +5,7 @@
 #include <cstring>
 #include <cstdlib>
 
-#include "math.h"
+#include "engine_math.h"
 
 #define OBJ_MAX_MATERIALS 32
 #define OBJ_MAX_SECTORS   32

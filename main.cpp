@@ -20,23 +20,29 @@
    single translation unit. */
 static void conLogf(const char *fmt, ...);
 
+/* SDLFun keeps the original 540-unit virtual canvas (text constants in
+   menu.h / console.h / main.cpp HUD assume this height). Override before
+   ui.h is parsed; engine default is 480 (which is what Find5 ships at). */
+#define UI_VIRTUAL_H 540.0f
+
 #include "obj_loader.h"
-#include "texture.h"
-#include "ui.h"
-#include "sound.h"
-#include "music.h"
+#include "texture.h"             /* SOOB-Core */
+#include "ui.h"                  /* SOOB-Core */
+#include "sound.h"               /* SOOB-Core */
+#include "music.h"               /* SOOB-Core */
 #include "iqm.h"
-#include "asset_registry.h"
+#include "asset_registry.h"      /* SOOB-Core */
 #include "entity.h"
 #include "flashlight.h"
 #include "physics.h"
 #include "nav.h"
 #include "path.h"
 #include "console.h"
-#include "script.h"
+#include "script.h"              /* SOOB-Core */
+#include "script_ext.h"          /* SDLFun-side bindings (ent_activate) */
 #include "game.h"
 #include "menu.h"
-#include "config.h"
+#include "config.h"              /* SOOB-Core */
 
 #define SAMPLE_RATE 44100
 
@@ -352,7 +358,7 @@ static void renderLevelSectored(ObjMesh *mesh, TexCache *cache)
             mat = &mesh->materials[sec->materialId];
             alphaTest = mat->alphaTest;
             alphaRef  = mat->alphaRef;
-            diffTex = texCacheGetA(cache, mat->diffusePath, GL_REPEAT, alphaTest);
+            diffTex = texCacheGetA(cache, mat->diffusePath, GL_REPEAT, alphaTest, NULL, NULL);
             lmTex   = texCacheGet(cache, mat->lightmapPath, GL_CLAMP_TO_EDGE);
             tileScale = mat->tilingScale;
         }
@@ -902,22 +908,36 @@ int main(int argc, char *argv[])
     conInit(&con);
     conBind(&con);
 
+    /* App state machine — created early so its menuTex is available to
+       scriptInit as the shared texture cache (Lua draw_region / draw_bg /
+       draw_blur all need a cache; reusing app.menuTex means no extra
+       cache instance and one set of GL textures across menu + scripts). */
+    AppState app;
+    appInit(&app, SCREEN_W, SCREEN_H, &ui, NULL, NULL, &snd, &sndLib, &mus, &musLib);
+
+    /* App-level blur cache for Lua draw_blur. Separate from menuTex
+       because TexBlurCache stores downsampled summaries, not full
+       texture uploads. */
+    TexBlurCache blurCache;
+    texBlurInit(&blurCache);
+
     /* App-level Lua runtime + asset registry. Loaded once before any game
-       boots so .ent files can resolve model/texture logical names and
-       sound/font tables can populate their libraries. scriptInit takes
-       NULL entities — gameInit rebinds script->entities for the current
-       session. */
+       boots so .ent files can resolve model / texture logical names and
+       sound / font tables can populate their libraries. */
     AssetRegistry assetReg;
     assetRegInit(&assetReg);
     ScriptSystem script;
-    scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, NULL, &assetReg);
+    scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, &assetReg,
+               &app.menuTex, &blurCache, "sdlfun.dat");
+    scriptExtRegister(&script);          /* SDLFun-only: ent_activate */
     scriptLoadAssets(&script, "assets.lua");
     scriptInstallConsolePrint(&script);  /* override Lua print → console */
 
-    /* App state machine. Starts in MODE_MENU with the MainMenu pushed and
-       no Game yet — New Game triggers the first gameInit. */
-    AppState app;
-    appInit(&app, SCREEN_W, SCREEN_H, &ui, &assetReg, &script, &snd, &sndLib, &mus, &musLib);
+    /* Backfill the AssetRegistry + ScriptSystem pointers on AppState now
+       that they exist. Tolerates the early appInit above (which was
+       only run early so app.menuTex was usable by scriptInit). */
+    app.assetReg = &assetReg;
+    app.script   = &script;
 
     /* Game struct is allocated once on the stack; gameInited tracks
        whether it currently holds an active session (so gameFree only
@@ -1324,6 +1344,7 @@ int main(int argc, char *argv[])
     if (gameInited) gameFree(&game, &script);
     appShutdown(&app);
     scriptShutdown(&script);
+    texBlurFree(&blurCache);
     uiShutdown(&ui);
 
     musicShutdown(&mus);

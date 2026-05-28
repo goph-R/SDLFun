@@ -5,28 +5,27 @@ echo === SDLFun Win98/Dev-C++ Build ===
 echo.
 
 REM ----------------------------------------------------------------
-REM  Check for OpenAL headers and import library.
-REM  Options for Win98:
-REM    - Creative's reference OpenAL32.dll (the historically correct pick;
-REM      expose an MSVC .lib you'd convert to libOpenAL32.a via dlltool).
-REM    - OpenAL Soft old release that still supports 9x — unverified.
-REM  Either way, the files we expect in vendor/:
-REM    vendor\include\AL\al.h, alc.h     ^(headers^)
-REM    vendor\lib\libOpenAL32.a OR       ^(MinGW import library^)
-REM    vendor\lib\libOpenAL32.dll.a      ^(OpenAL Soft MinGW variant^)
-REM    OpenAL32.dll                      ^(next to the exe, or installed in System^)
+REM  Shared engine (2D / audio / scripting) lives at ..\SOOB-Core\.
+REM  Bullet stays here -- 3D-only, FPS-demo-specific.
 REM ----------------------------------------------------------------
-if not exist "vendor\include\AL\al.h" (
+set "ENGINE=..\SOOB-Core"
+
+REM ----------------------------------------------------------------
+REM  Check for OpenAL headers and import library in the shared engine.
+REM    %ENGINE%\vendor\include\AL\al.h, alc.h     ^(headers^)
+REM    %ENGINE%\vendor\lib\libOpenAL32.a OR       ^(MinGW import library^)
+REM    %ENGINE%\vendor\lib\libOpenAL32.dll.a      ^(OpenAL Soft MinGW variant^)
+REM    OpenAL32.dll                               ^(next to the exe^)
+REM ----------------------------------------------------------------
+if not exist "%ENGINE%\vendor\include\AL\al.h" (
     echo ERROR: OpenAL headers missing.
-    echo Place al.h and alc.h in vendor\include\AL\.
+    echo Place al.h and alc.h in %ENGINE%\vendor\include\AL\.
     goto error
 )
-if not exist "vendor\lib\libOpenAL32.a" (
-    if not exist "vendor\lib\libOpenAL32.dll.a" (
+if not exist "%ENGINE%\vendor\lib\libOpenAL32.a" (
+    if not exist "%ENGINE%\vendor\lib\libOpenAL32.dll.a" (
         echo ERROR: OpenAL MinGW import library missing.
-        echo Expected vendor\lib\libOpenAL32.a or libOpenAL32.dll.a.
-        echo   From Creative SDK: convert OpenAL32.lib with dlltool.
-        echo   From OpenAL Soft:  use libs\Win32\libOpenAL32.dll.a.
+        echo Expected %ENGINE%\vendor\lib\libOpenAL32.a or libOpenAL32.dll.a.
         goto error
     )
 )
@@ -71,7 +70,7 @@ REM  -DLUA_ANSI disables loadlib dlopen / Win32 branches that Dev-C++ 3.4
 REM  can't satisfy. -Dluaall_c is Lua's own unity-build switch.
 REM ----------------------------------------------------------------
 echo Compiling Lua...
-C:\Dev-Cpp\bin\gcc.exe -Ivendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c vendor\lua-5.1.5\src\lua_all.c -o %OBJDIR%\lua.o
+C:\Dev-Cpp\bin\gcc.exe -I%ENGINE%\vendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c %ENGINE%\vendor\lua-5.1.5\src\lua_all.c -o %OBJDIR%\lua.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
@@ -81,22 +80,23 @@ if exist %OBJDIR%\vorbis.o (
     echo Skipping stb_vorbis ^(vorbis.o cached^)
 ) else (
     echo Compiling stb_vorbis...
-    C:\Dev-Cpp\bin\gcc.exe -O2 -c vendor\stb\stb_vorbis.c -o %OBJDIR%\vorbis.o
+    C:\Dev-Cpp\bin\gcc.exe -O2 -c %ENGINE%\vendor\stb\stb_vorbis.c -o %OBJDIR%\vorbis.o
     if errorlevel 1 goto error
 )
 
 REM ----------------------------------------------------------------
-REM  Compile main
+REM  Compile main.  -I%ENGINE% lets #include "script.h" etc. resolve
+REM  to the shared headers.
 REM ----------------------------------------------------------------
 echo Compiling main...
-C:\Dev-Cpp\bin\g++.exe -Ivendor\include -Ivendor\bullet3-3.25\src -Ivendor\lua-5.1.5\src -O2 -c main.cpp -o %OBJDIR%\main.o
+C:\Dev-Cpp\bin\g++.exe -I%ENGINE% -I%ENGINE%\vendor\include -Ivendor\bullet3-3.25\src -I%ENGINE%\vendor\lua-5.1.5\src -O2 -c main.cpp -o %OBJDIR%\main.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
 REM  Link
 REM ----------------------------------------------------------------
 echo Linking...
-C:\Dev-Cpp\bin\g++.exe %OBJDIR%\main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o %OBJDIR%\vorbis.o -o SDLFun.exe -Lvendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
+C:\Dev-Cpp\bin\g++.exe %OBJDIR%\main.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o %OBJDIR%\vorbis.o -o SDLFun.exe -L%ENGINE%\vendor\lib -lmingw32 -lSDLmain -lSDL -lopengl32 -lOpenAL32
 if errorlevel 1 goto error
 
 echo.
