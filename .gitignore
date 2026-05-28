@@ -5,6 +5,10 @@ sdlfun
 build/
 raw/obj/
 
+# Engine Lua modules copied from ../SOOB-Core/ at build time.
+# Source of truth lives in SOOB-Core; this dir is regenerated on each build.
+scripts/engine/
+
 # Temp/log files
 output.txt
 stdout.txt

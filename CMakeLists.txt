@@ -26,3 +26,13 @@ include_directories(${ENGINE} ${SDL_INCLUDE_DIR} ${OPENAL_INCLUDE_DIR}
 
 add_executable(SDLFun main.cpp ${ENGINE}/vendor/stb/stb_vorbis.c)
 target_link_libraries(SDLFun ${SDL_LIBS} ${OPENGL_LIBRARIES} ${OPENAL_LIBRARY})
+
+# Mirror the engine's Lua modules next to the exe so shipped builds find
+# require "engine.scene" via ./scripts/?.lua without needing SOOB-Core
+# on the player's machine.
+add_custom_command(TARGET SDLFun POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            ${CMAKE_SOURCE_DIR}/scripts/engine
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${ENGINE}/scripts/engine
+            ${CMAKE_SOURCE_DIR}/scripts/engine)

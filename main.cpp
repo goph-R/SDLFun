@@ -42,6 +42,7 @@ static void conLogf(const char *fmt, ...);
 #include "script_ext.h"          /* SDLFun-side bindings (ent_activate) */
 #include "game.h"
 #include "menu.h"
+#include "app_ext.h"             /* SDLFun-side app_* bindings (needs AppState from menu.h) */
 #include "config.h"              /* SOOB-Core */
 
 #define SAMPLE_RATE 44100
@@ -929,7 +930,8 @@ int main(int argc, char *argv[])
     ScriptSystem script;
     scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, &assetReg,
                &app.menuTex, &blurCache, "sdlfun.dat");
-    scriptExtRegister(&script);          /* SDLFun-only: ent_activate */
+    scriptExtRegister(&script);          /* SDLFun-only: ent_activate, conExecute */
+    appExtRegister(&script);             /* SDLFun-only: app_new_game / continue / quit / has_game */
     scriptLoadAssets(&script, "assets.lua");
     scriptInstallConsolePrint(&script);  /* override Lua print → console */
 
@@ -938,6 +940,12 @@ int main(int argc, char *argv[])
        only run early so app.menuTex was usable by scriptInit). */
     app.assetReg = &assetReg;
     app.script   = &script;
+    appExtSetApp(&app);                  /* wire AppState into app_* bindings */
+
+    /* Run the entry script ONCE at app boot — it installs the scene-stack
+       hooks and pushes the initial menu scene. Per-session work (HUD
+       welcome message, etc.) lives in on_start which gameInit fires. */
+    scriptRunFile(&script, "scripts/main.lua");
 
     /* Game struct is allocated once on the stack; gameInited tracks
        whether it currently holds an active session (so gameFree only
@@ -968,7 +976,49 @@ int main(int argc, char *argv[])
         musicUpdate(&mus, dt);
 
         if (app.mode == MODE_MENU) {
-            menuTick(&app, dt);
+            /* ---- MODE_MENU: Lua scene stack owns input + render ---- */
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT) {
+                    app.running = 0;
+                    break;
+                }
+                if (event.type == SDL_KEYDOWN) {
+                    const char *name = SDL_GetKeyName(event.key.keysym.sym);
+                    scriptCallKeyDown(&script, name ? name : "");
+                }
+                if (event.type == SDL_KEYUP) {
+                    const char *name = SDL_GetKeyName(event.key.keysym.sym);
+                    scriptCallKeyUp(&script, name ? name : "");
+                }
+                if (event.type == SDL_MOUSEMOTION) {
+                    float vx = 0.0f, vy = 0.0f;
+                    uiMouseToVirtual(&ui, event.motion.x, event.motion.y, &vx, &vy);
+                    float scale = (ui.virtualH > 0)
+                                ? (ui.virtualH / (float)SCREEN_H) : 1.0f;
+                    float dvx = event.motion.xrel * scale;
+                    float dvy = event.motion.yrel * scale;
+                    scriptCallMouseMove(&script, vx, vy, dvx, dvy);
+                }
+                if (event.type == SDL_MOUSEBUTTONDOWN) {
+                    float vx = 0.0f, vy = 0.0f;
+                    uiMouseToVirtual(&ui, event.button.x, event.button.y, &vx, &vy);
+                    scriptCallMouseDown(&script, vx, vy, event.button.button);
+                }
+                if (event.type == SDL_MOUSEBUTTONUP) {
+                    float vx = 0.0f, vy = 0.0f;
+                    uiMouseToVirtual(&ui, event.button.x, event.button.y, &vx, &vy);
+                    scriptCallMouseUp(&script, vx, vy, event.button.button);
+                }
+            }
+
+            scriptCallUpdate(&script, dt);
+
+            glClearColor(0, 0, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            uiBegin(&ui);
+            scriptCallRender(&script);
+            uiDrawMessage(&ui);
+            uiEnd(&ui);
         } else {
         /* ---- MODE_GAME: gameplay event handling + simulation + render ---- */
         game.fpsAccum += dt;
@@ -1317,7 +1367,8 @@ int main(int argc, char *argv[])
                     gameInited = 1;
                     app.game = &game;
                     app.mode = MODE_GAME;
-                    screenStackClear(&app.screens);
+                    /* Lua scene stack stays intact across the mode flip —
+                       the main menu sits at the bottom throughout. */
                     SDL_WM_GrabInput(SDL_GRAB_ON);
                     SDL_ShowCursor(SDL_DISABLE);
                 }
@@ -1325,7 +1376,6 @@ int main(int argc, char *argv[])
             case PENDING_CONTINUE:
                 if (gameInited) {
                     app.mode = MODE_GAME;
-                    screenStackClear(&app.screens);
                     SDL_WM_GrabInput(SDL_GRAB_ON);
                     SDL_ShowCursor(SDL_DISABLE);
                 }

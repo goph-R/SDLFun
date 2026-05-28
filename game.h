@@ -180,10 +180,10 @@ static int gameInit(Game *g,
        graph if no waypoints placed. */
     navInit(&g->nav, g->entities, &g->phys);
 
-    /* Game scripts run once everything else is wired up. main.lua defines
-       hooks; on_start fires once so any HUD messages or initial switch
-       activations land on frame 0. */
-    scriptRunFile(script, "scripts/main.lua");
+    /* main.lua is now loaded once at app boot (see main.cpp), not per
+       session — the Lua menu state outlives gameInit/gameFree cycles.
+       on_start still fires here so per-session setup (welcome message,
+       initial switch activations) lands on frame 0. */
     scriptCall(script, "on_start");
 
     return 1;

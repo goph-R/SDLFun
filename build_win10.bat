@@ -126,6 +126,14 @@ if not exist "OpenAL32.dll" (
     )
 )
 
+REM ----------------------------------------------------------------
+REM  Mirror SOOB-Core's Lua engine modules next to the exe so
+REM  require "engine.scene" resolves via ./scripts/?.lua in shipped
+REM  builds without needing the SOOB-Core repo on the player's machine.
+REM ----------------------------------------------------------------
+if not exist scripts\engine mkdir scripts\engine
+copy /Y %ENGINE%\scripts\engine\*.lua scripts\engine\ >nul
+
 echo.
 echo === Build successful! Run SDLFun_w10.exe ===
 goto end

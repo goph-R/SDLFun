@@ -89,6 +89,16 @@ return {
         menu_title_font = "assets/fonts/orbitron.fnt",
     },
 
+    -- Regions are sub-rectangles of textures, addressed by name from
+    -- draw_region / draw_bg. Full-texture regions are (0, 0, full_w,
+    -- full_h). The Lua menu (scripts/menu.lua) draws these by name.
+    regions = {
+        menu_bg    = { tex = "menu_bg",    x = 0, y = 0, w = 256, h = 128 },
+        logo       = { tex = "logo",       x = 0, y = 0, w = 256, h = 64  },
+        dialog_bg  = { tex = "dialog_bg",  x = 0, y = 0, w = 64,  h = 64  },
+        loading_bg = { tex = "loading_bg", x = 0, y = 0, w = 256, h = 128 },
+    },
+
     levels = {
         level1 = { obj = "assets/levels/test_level.obj", ent = "assets/levels/test_level.ent" },
         -- level2 = { obj = "...", ent = "..." },
