@@ -6,6 +6,23 @@ The name is an acronym for the four foundation libraries the engine is built on:
 
 ![SOOB Engine running on Windows 10](docs/screenshot.jpg)
 
+## Depends on SOOB-Core
+
+The 2D / audio / scripting core lives in a sibling repo, [**goph-R/SOOB-Core**](https://github.com/goph-R/SOOB-Core), and is shared with [goph-R/Find5](https://github.com/goph-R/Find5). Before building, clone it next to this one:
+
+```
+Win98/
+├── SOOB-Engine/   ← this repo
+├── SOOB-Core/     ← clone alongside
+└── Find5/         ← optional, shares the same engine
+```
+
+```sh
+git clone git@github.com:goph-R/SOOB-Core.git
+```
+
+Build scripts add `-I../SOOB-Core/` so `#include "script.h"` etc. resolve into the shared engine. Engine-side Lua modules (e.g. `engine.scene`) are copied next to the .exe at build time. SDLFun itself owns only the 3D-specific code (Bullet wrapper, `obj_loader.h`, `iqm.h`, `entity.h`, `physics.h`, `nav.h`, `flashlight.h`, `game.h`, `console.h`).
+
 ## Building
 
 See `CLAUDE.md` for the full build matrix and toolchain details.
@@ -16,9 +33,15 @@ Quick reference:
 - **Windows 10 / portable MinGW**: `build_win10.bat` → `SDLFun_w10.exe`
 - **CMake**: `mkdir build && cd build && cmake .. && make`
 
+## Menu + scripting
+
+The main menu, options screen, and confirm dialogs are written in Lua on top of SOOB-Core's `engine.scene` scene-stack module — see `scripts/main.lua` and `scripts/menu.lua`. The C side keeps `AppState` + a one-shot `pendingAction`; menu code calls `app_new_game()` / `app_continue()` / `app_quit()` bindings (declared in `app_ext.h`) to drive game-state transitions.
+
+The same pattern is intended for in-game mini-games (PIN-code panels, hacking puzzles, terminal interfaces): each becomes a Lua module that returns a scene factory, pushed on top of the 3D game while the simulation pauses. Architecture sketch in [`docs/add-mini-game.md`](docs/add-mini-game.md).
+
 ## Controls
 
-Boot lands on the main menu. Up/Down + Enter (or mouse) navigate the CONTINUE / NEW GAME / OPTIONS / EXIT buttons. The exit dialog uses Left/Right + Enter / Esc.
+Boot lands on the Lua main menu. Up/Down + Enter (or mouse) navigate the CONTINUE / NEW GAME / OPTIONS / EXIT buttons. The exit dialog uses Left/Right + Enter / Esc.
 
 In-game: WASD move, mouse look, Space jump, F flashlight, Left-click fire, backtick (`) drops down the dev console (Lua REPL), Esc back to menu.
 
