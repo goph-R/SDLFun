@@ -88,7 +88,6 @@ static void appInit(AppState *app, int screenW, int screenH,
     /* Title music is now started by Lua's main_menu:enter() — no need
        to call musicPlay here. The Lua side has the asset name and the
        binding. */
-    (void)music; (void)musLib;
 }
 
 static void appShutdown(AppState *app)
