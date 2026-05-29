@@ -91,6 +91,27 @@ local function hover_focus(widgets, current, x, y)
     return current
 end
 
+-- True if any widget is mid-interaction (slider drag or button press).
+-- Used to suppress hover_focus during a drag so the dragged slider
+-- doesn't lose visual focus when the cursor moves off it.
+local function any_interacting(widgets)
+    for _, w in ipairs(widgets) do
+        if w._dragging or w._pressed then return true end
+    end
+    return false
+end
+
+-- Standard mousemove dispatch: deliver to every widget (sliders need
+-- mousemove regardless of hit-test so a drag can continue off-track),
+-- then update hover focus only if no widget is currently interacting.
+local function dispatch_mousemove(widgets, current, x, y)
+    for _, w in ipairs(widgets) do
+        if w.mousemove then w:mousemove(x, y) end
+    end
+    if any_interacting(widgets) then return current end
+    return hover_focus(widgets, current, x, y)
+end
+
 -- ---- Main menu ---------------------------------------------------------
 
 function M.main_menu()
@@ -171,7 +192,7 @@ function M.main_menu()
     end
 
     function mm:mousemove(x, y)
-        self.focused_widget = hover_focus(self.widgets, self.focused_widget, x, y)
+        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
     end
 
     function mm:mousedown(x, y, button)
@@ -186,6 +207,19 @@ function M.main_menu()
 end
 
 -- ---- Options -----------------------------------------------------------
+--
+-- Sample settings wired via opt_set / opt_get + the engine's
+-- music_volume binding. Used as the dogfood scene for Checkbox + Slider
+-- + Label.
+--
+-- - "Music" checkbox toggles persisted `music_on` and mutes/restores
+--   the music volume immediately.
+-- - "Master volume" slider sets persisted `music_vol` and applies it
+--   live whenever Music is on.
+--
+-- Options are saved to sdlfun.dat when the user presses BACK / Esc /
+-- Backspace; on_change runs only in-memory + applies the live audio
+-- effect so dragging the slider doesn't thrash the disk.
 
 function M.options()
     local opt = { transparent = true }   -- main menu renders behind us
@@ -193,11 +227,64 @@ function M.options()
     opt.vw, opt.vh = vw, vh
     opt.title_y = -vh * 0.5 + PAD
 
-    local back = make_menu_button(-BTN_W * 0.5, -BTN_H * 0.5, BTN_W, BTN_H,
-                                  "BACK", function() scene.pop() end)
-    back.focused = true
-    opt.widgets        = { back }
-    opt.focused_widget = back
+    -- Persisted defaults — sane on first run.
+    local music_on  = opt_get("music_on",  true)
+    local music_vol = opt_get("music_vol", 0.7)
+
+    -- Layout: settings column starts below the title, centred.
+    local COL_W = 320
+    local COL_X = -COL_W * 0.5
+    local row_y = opt.title_y + 60
+
+    -- Forward reference so the checkbox's on_change can read the
+    -- slider's current value.
+    local music_slider
+
+    local music_check = widget.checkbox{
+        x = COL_X, y = row_y, width = COL_W, height = BTN_H,
+        text  = "Music",
+        font  = "button_font",
+        scale = SCALE_BUTTON,
+        color = BTN_FG_COLOR,
+        value = music_on,
+        on_change = function(self, v)
+            opt_set("music_on", v)
+            music_volume(v and music_slider.value or 0.0)
+        end,
+    }
+    row_y = row_y + BTN_H + BTN_GAP
+
+    local vol_label = widget.label{
+        x = COL_X, y = row_y, width = COL_W, height = 22,
+        text  = "Master volume",
+        font  = "button_font",
+        scale = SCALE_BUTTON,
+        color = BTN_FG_COLOR,
+        align = ALIGN_LEFT + ALIGN_MIDDLE,
+    }
+    row_y = row_y + 22 + 4
+
+    music_slider = widget.slider{
+        x = COL_X, y = row_y, width = COL_W, height = 18,
+        min = 0.0, max = 1.0, value = music_vol, step = 0.05,
+        on_change = function(self, v)
+            opt_set("music_vol", v)
+            if opt_get("music_on", true) then music_volume(v) end
+        end,
+    }
+    row_y = row_y + 18 + BTN_GAP * 2
+
+    local function commit_and_pop()
+        opt_save()
+        scene.pop()
+    end
+
+    local back = make_menu_button(-BTN_W * 0.5, row_y, BTN_W, BTN_H,
+                                  "BACK", commit_and_pop)
+
+    opt.widgets        = { music_check, vol_label, music_slider, back }
+    opt.focused_widget = music_check
+    music_check.focused = true
 
     function opt:render()
         draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
@@ -212,9 +299,9 @@ function M.options()
     end
 
     function opt:keydown(name)
-        -- Esc/Backspace are dialog-cancel-style shortcuts; always pop.
+        -- Esc/Backspace commit + leave.
         if name == "escape" or name == "backspace" then
-            scene.pop()
+            commit_and_pop()
             return
         end
         self.focused_widget = widget.dispatch_keydown(
@@ -222,7 +309,7 @@ function M.options()
     end
 
     function opt:mousemove(x, y)
-        self.focused_widget = hover_focus(self.widgets, self.focused_widget, x, y)
+        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
     end
 
     function opt:mousedown(x, y, button)
@@ -304,7 +391,7 @@ function M.confirm_dialog(title, message, on_ok)
     end
 
     function dlg:mousemove(x, y)
-        self.focused_widget = hover_focus(self.widgets, self.focused_widget, x, y)
+        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
     end
 
     function dlg:mousedown(x, y, button)
