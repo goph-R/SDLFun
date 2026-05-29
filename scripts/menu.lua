@@ -228,8 +228,9 @@ function M.options()
     opt.title_y = -vh * 0.5 + PAD
 
     -- Persisted defaults — sane on first run.
-    local music_on  = opt_get("music_on",  true)
-    local music_vol = opt_get("music_vol", 0.7)
+    local music_on    = opt_get("music_on",    true)
+    local music_vol   = opt_get("music_vol",   0.7)
+    local player_name = opt_get("player_name", "")
 
     -- Layout: settings column starts below the title, centred.
     local COL_W = 320
@@ -274,6 +275,33 @@ function M.options()
     }
     row_y = row_y + 18 + BTN_GAP * 2
 
+    local name_label = widget.label{
+        x = COL_X, y = row_y, width = COL_W, height = 22,
+        text  = "Player name",
+        font  = "button_font",
+        scale = SCALE_BUTTON,
+        color = BTN_FG_COLOR,
+        align = ALIGN_LEFT + ALIGN_MIDDLE,
+    }
+    row_y = row_y + 22 + 4
+
+    local name_edit = widget.line_edit{
+        x = COL_X, y = row_y, width = COL_W, height = 28,
+        text = player_name,
+        font = "button_font",
+        scale = SCALE_BUTTON,
+        color = BTN_FG_COLOR,
+        bg_color = {
+            enabled  = { 0.10, 0.10, 0.14, 0.85 },
+            disabled = { 0.05, 0.05, 0.08, 0.6 },
+        },
+        padding     = { l = 8, r = 8, t = 4, b = 4 },
+        max_length  = 24,
+        placeholder = "Type your name",
+        on_change   = function(self, t) opt_set("player_name", t) end,
+    }
+    row_y = row_y + 28 + BTN_GAP * 2
+
     local function commit_and_pop()
         opt_save()
         scene.pop()
@@ -282,7 +310,8 @@ function M.options()
     local back = make_menu_button(-BTN_W * 0.5, row_y, BTN_W, BTN_H,
                                   "BACK", commit_and_pop)
 
-    opt.widgets        = { music_check, vol_label, music_slider, back }
+    opt.widgets        = { music_check, vol_label, music_slider,
+                           name_label, name_edit, back }
     opt.focused_widget = music_check
     music_check.focused = true
 
@@ -298,14 +327,36 @@ function M.options()
         for _, w in ipairs(self.widgets) do w:draw() end
     end
 
+    function opt:update(dt)
+        widget.dispatch_update(self.widgets, dt)
+    end
+
     function opt:keydown(name)
-        -- Esc/Backspace commit + leave.
-        if name == "escape" or name == "backspace" then
+        -- Esc commits + leaves. Backspace also commits — UNLESS the
+        -- focused widget consumes it (LineEdit eats Backspace to delete
+        -- a character). dispatch_keydown returns the same widget when
+        -- the keypress was absorbed, so we differentiate by trying the
+        -- widget first and only popping if the keydown bubbles back.
+        if name == "escape" then
+            commit_and_pop()
+            return
+        end
+        if name == "backspace" then
+            if self.focused_widget and self.focused_widget.keydown
+               and self.focused_widget:keydown(name) then
+                return       -- LineEdit consumed it
+            end
             commit_and_pop()
             return
         end
         self.focused_widget = widget.dispatch_keydown(
             self.widgets, self.focused_widget, name)
+    end
+
+    function opt:textinput(ch)
+        if self.focused_widget and self.focused_widget.textinput then
+            self.focused_widget:textinput(ch)
+        end
     end
 
     function opt:mousemove(x, y)
