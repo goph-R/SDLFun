@@ -1313,25 +1313,30 @@ int main(int argc, char *argv[])
             UiColor red   = uiRgb(0.85f, 0.2f, 0.2f);
             UiColor amber = uiRgb(1.0f, 1.0f, 0.2f);
 
+            /* HUD text scales are now in the new uiText convention:
+               scale * font.lineHeight = on-screen line height in vpx.
+               Default font is orbitron_small (lineHeight = 28). Targets
+               match the pre-SOOB-Core sizes (20 / 28 / 32 / 16 vpx). */
+
             /* Health: bottom-left */
             uiText(&ui, -halfW + pad, halfH - pad - barH - 17,
-                   white, "HEALTH", 2.5f);
+                   white, "HEALTH", 20.0f / 28.0f);             /* ~20 vpx */
             uiBar(uiRectMake(-halfW + pad, halfH - pad - barH, barW, barH),
                   0.87f, red);
             uiText(&ui, -halfW + pad + barW + 10, halfH - pad - barH + 2,
-                   white, "87", 3.5f);
+                   white, "87", 28.0f / 28.0f);                 /* ~28 vpx */
 
             /* Ammo: bottom-right */
             char ammo[32];
             snprintf(ammo, sizeof(ammo), "%d / %d", 24, 72);
             uiText(&ui, halfW - pad, halfH - pad - 20, amber, ammo,
-                   4.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
+                   32.0f / 28.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);   /* ~32 vpx */
 
             /* FPS: top-right */
             char fps[32];
             snprintf(fps, sizeof(fps), "%d FPS", game.fpsDisplay);
             uiText(&ui, halfW - pad, -halfH + pad, white, fps,
-                   2.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);
+                   16.0f / 28.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);   /* ~16 vpx */
 
             /* Transient script-driven message (ui_show_message from Lua). */
             uiDrawMessage(&ui);

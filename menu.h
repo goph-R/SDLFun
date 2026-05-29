@@ -164,8 +164,10 @@ static void drawLoadingScreen(AppState *app)
     float halfW = uiGetWidth(ui)  * 0.5f;
     float halfH = uiGetHeight(ui) * 0.5f;
     UiColor fg = uiRgba(1, 1, 1, 1);
+    /* button_font = orbitron_small alias, lineHeight 28. Old scale 5.0
+       targeted ~40 vpx; in the new convention that's 40/28. */
     uiText(ui, halfW - 30.0f, halfH - 30.0f,
-           fg, "LOADING", 5.0f,
+           fg, "LOADING", 40.0f / 28.0f,
            UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "button_font");
     uiEnd(ui);
 

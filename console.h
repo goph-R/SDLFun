@@ -185,8 +185,11 @@ static int conKey(Console *c, int sym)
  * Cursor glyph (`_`) blinks at 2Hz. */
 
 #define CON_PAD_X       9.0f
-#define CON_LINE_SCALE  2.0f    /* uiText 'scale' for scrollback lines  */
-#define CON_PROMPT_SCALE 2.5f   /* uiText 'scale' for prompt + input    */
+/* uiText scales — new convention: scale * font.lineHeight = on-screen
+   line height in vpx. Default font is orbitron_small (lineHeight = 28).
+   Pre-SOOB-Core targets were 16 vpx (scrollback) and 20 vpx (prompt). */
+#define CON_LINE_SCALE   (16.0f / 28.0f)   /* scrollback lines  */
+#define CON_PROMPT_SCALE (20.0f / 28.0f)   /* prompt + input    */
 #define CON_DIVIDER_PX  2.0f
 
 static void conRender(Console *c, UiState *ui, GLuint bgTex)
