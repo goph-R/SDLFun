@@ -67,8 +67,9 @@ local function make_menu_button(x, y, w, h, label, on_click)
     })
 end
 
--- Helper: walk a widget list dispatching a mouse event by name. Each
--- widget is queried in order; first one to claim the event wins.
+-- Walk a widget list delivering a mouse event by name. First widget to
+-- claim the event wins. Used for mouseup; mousedown has its own helper
+-- below because it also has to update focus.
 local function dispatch_mouse(widgets, method, x, y, button)
     for _, w in ipairs(widgets) do
         if w[method](w, x, y, button) then return true end
@@ -76,40 +77,30 @@ local function dispatch_mouse(widgets, method, x, y, button)
     return false
 end
 
--- Helper: mouse-hover focus — when the cursor sits over an enabled
--- focusable widget, give it focus (clearing whichever widget had it
--- before). Matches the old menu's behavior where hovering a button
--- highlighted it.
-local function hover_focus(widgets, current, x, y)
+-- Mousedown dispatcher: tries each widget; the first that claims the
+-- event also takes focus (matching standard click-to-focus). Returns
+-- the new focused widget (or `current` if nothing focusable was hit).
+local function dispatch_mousedown(widgets, current, x, y, button)
     for _, w in ipairs(widgets) do
-        if w.focusable and not w.disabled and w:hit(x, y) then
-            if current and current ~= w then current.focused = false end
-            w.focused = true
-            return w
+        if w:mousedown(x, y, button) then
+            if w.focusable and not w.disabled and w ~= current then
+                if current then current.focused = false end
+                w.focused = true
+                return w
+            end
+            return current
         end
     end
     return current
 end
 
--- True if any widget is mid-interaction (slider drag or button press).
--- Used to suppress hover_focus during a drag so the dragged slider
--- doesn't lose visual focus when the cursor moves off it.
-local function any_interacting(widgets)
-    for _, w in ipairs(widgets) do
-        if w._dragging or w._pressed then return true end
-    end
-    return false
-end
-
--- Standard mousemove dispatch: deliver to every widget (sliders need
--- mousemove regardless of hit-test so a drag can continue off-track),
--- then update hover focus only if no widget is currently interacting.
-local function dispatch_mousemove(widgets, current, x, y)
+-- Mousemove dispatcher: deliver to every widget regardless of hit-test
+-- (a slider being dragged needs mousemove even when the cursor leaves
+-- its track). Focus is NOT updated on hover — it moves on mousedown.
+local function dispatch_mousemove(widgets, x, y)
     for _, w in ipairs(widgets) do
         if w.mousemove then w:mousemove(x, y) end
     end
-    if any_interacting(widgets) then return current end
-    return hover_focus(widgets, current, x, y)
 end
 
 -- ---- Main menu ---------------------------------------------------------
@@ -192,11 +183,12 @@ function M.main_menu()
     end
 
     function mm:mousemove(x, y)
-        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
+        dispatch_mousemove(self.widgets, x, y)
     end
 
     function mm:mousedown(x, y, button)
-        dispatch_mouse(self.widgets, "mousedown", x, y, button)
+        self.focused_widget = dispatch_mousedown(
+            self.widgets, self.focused_widget, x, y, button)
     end
 
     function mm:mouseup(x, y, button)
@@ -360,11 +352,12 @@ function M.options()
     end
 
     function opt:mousemove(x, y)
-        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
+        dispatch_mousemove(self.widgets, x, y)
     end
 
     function opt:mousedown(x, y, button)
-        dispatch_mouse(self.widgets, "mousedown", x, y, button)
+        self.focused_widget = dispatch_mousedown(
+            self.widgets, self.focused_widget, x, y, button)
     end
 
     function opt:mouseup(x, y, button)
@@ -442,11 +435,12 @@ function M.confirm_dialog(title, message, on_ok)
     end
 
     function dlg:mousemove(x, y)
-        self.focused_widget = dispatch_mousemove(self.widgets, self.focused_widget, x, y)
+        dispatch_mousemove(self.widgets, x, y)
     end
 
     function dlg:mousedown(x, y, button)
-        dispatch_mouse(self.widgets, "mousedown", x, y, button)
+        self.focused_widget = dispatch_mousedown(
+            self.widgets, self.focused_widget, x, y, button)
     end
 
     function dlg:mouseup(x, y, button)
