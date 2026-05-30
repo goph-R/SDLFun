@@ -1,16 +1,10 @@
 -- Main-menu / options / confirm-dialog scenes for SDLFun.
 --
--- Each constructor returns a "scene" table (see engine/scene.lua) with
--- update/render/keydown/mousedown/etc. methods. The C side keeps
--- AppState + pendingAction; these scenes call the app_* bindings to
--- trigger NEW_GAME / CONTINUE / QUIT side-effects.
---
--- Built on engine.widget — every button is widget.button() with its
--- on_click capturing whatever C-side binding it should fire. Keyboard
--- nav (Up/Down/Left/Right, Tab, Return, Space) is dispatched through
--- widget.dispatch_keydown which handles spatial navigation between
--- enabled focusable widgets and fall-through to the focused widget's
--- own keydown.
+-- Each constructor returns a "scene" table (see engine/scene.lua) whose
+-- widgets live inside a `root` panel. engine.scene's dispatchers auto-
+-- forward update / mouse / key / textinput into root, so each scene
+-- only defines what's actually scene-specific (enter to build widgets,
+-- render for backdrop / title art, keydown for Esc handling).
 
 local scene  = require "engine.scene"
 local widget = require "engine.widget"
@@ -67,46 +61,10 @@ local function make_menu_button(x, y, w, h, label, on_click)
     })
 end
 
--- Walk a widget list delivering a mouse event by name. First widget to
--- claim the event wins. Used for mouseup; mousedown has its own helper
--- below because it also has to update focus.
-local function dispatch_mouse(widgets, method, x, y, button)
-    for _, w in ipairs(widgets) do
-        if w[method](w, x, y, button) then return true end
-    end
-    return false
-end
-
--- Mousedown dispatcher: tries each widget; the first that claims the
--- event also takes focus (matching standard click-to-focus). Returns
--- the new focused widget (or `current` if nothing focusable was hit).
-local function dispatch_mousedown(widgets, current, x, y, button)
-    for _, w in ipairs(widgets) do
-        if w:mousedown(x, y, button) then
-            if w.focusable and not w.disabled and w ~= current then
-                if current then current.focused = false end
-                w.focused = true
-                return w
-            end
-            return current
-        end
-    end
-    return current
-end
-
--- Mousemove dispatcher: deliver to every widget regardless of hit-test
--- (a slider being dragged needs mousemove even when the cursor leaves
--- its track). Focus is NOT updated on hover — it moves on mousedown.
-local function dispatch_mousemove(widgets, x, y)
-    for _, w in ipairs(widgets) do
-        if w.mousemove then w:mousemove(x, y) end
-    end
-end
-
 -- ---- Main menu ---------------------------------------------------------
 
 function M.main_menu()
-    local mm = {}
+    local mm = { root = widget.panel({ x = 0, y = 0 }) }
 
     function mm:enter()
         local vw, vh = view_size()
@@ -121,11 +79,17 @@ function M.main_menu()
         local y = -hh + PAD + LOGO_H + PAD
         local row = function(i) return y + (BTN_H + BTN_GAP) * i end
 
-        self.widgets = {
-            make_menu_button(x, row(0), BTN_W, BTN_H, "CONTINUE", function()
-                app_continue()
-            end),
-            make_menu_button(x, row(1), BTN_W, BTN_H, "NEW GAME", function()
+        -- CONTINUE — disabled flag set BEFORE :add so the panel's auto-
+        -- focus skips it (is_focusable rejects disabled). The next
+        -- focusable child (NEW GAME) then claims focus, matching the
+        -- old widget.focus_next(nil) behaviour.
+        local continue = make_menu_button(x, row(0), BTN_W, BTN_H, "CONTINUE",
+            function() app_continue() end)
+        continue.disabled = not app_has_game()
+        self.root:add(continue)
+
+        self.root:add(make_menu_button(x, row(1), BTN_W, BTN_H, "NEW GAME",
+            function()
                 if app_has_game() then
                     scene.push(M.confirm_dialog(
                         "NEW GAME",
@@ -134,65 +98,49 @@ function M.main_menu()
                 else
                     app_new_game()
                 end
-            end),
-            make_menu_button(x, row(2), BTN_W, BTN_H, "OPTIONS", function()
-                scene.push(M.options())
-            end),
-            make_menu_button(x, row(3), BTN_W, BTN_H, "EXIT", function()
-                scene.push(M.confirm_dialog("EXIT", "Exit to system?", app_quit))
-            end),
-        }
+            end))
 
-        self:_layout()
-        -- Initial focus: first enabled widget.
-        self.focused_widget = widget.focus_next(self.widgets, nil)
-        if self.focused_widget then self.focused_widget.focused = true end
+        self.root:add(make_menu_button(x, row(2), BTN_W, BTN_H, "OPTIONS",
+            function() scene.push(M.options()) end))
+
+        self.root:add(make_menu_button(x, row(3), BTN_W, BTN_H, "EXIT",
+            function()
+                scene.push(M.confirm_dialog("EXIT", "Exit to system?", app_quit))
+            end))
 
         -- Title music starts on first menu entry; later re-enters
         -- crossfade smoothly.
         music_play("title", 1.0, true)
     end
 
-    -- Toggle CONTINUE's enabled flag based on the C-side game pointer,
-    -- and slide focus off it if it just became disabled.
-    function mm:_layout()
-        self.widgets[1].disabled = not app_has_game()
-        if self.focused_widget and self.focused_widget.disabled then
-            local next_w = widget.focus_next(self.widgets, self.focused_widget)
-            if next_w and next_w ~= self.focused_widget then
-                self.focused_widget.focused = false
-                self.focused_widget = next_w
-                self.focused_widget.focused = true
+    -- CONTINUE's enabled flag tracks app_has_game() — that becomes true
+    -- after the first New Game and stays true through subsequent
+    -- Esc → menu → Continue roundtrips. Sync once per frame from render;
+    -- if focus was sitting on CONTINUE and it just got disabled, slide
+    -- focus to the next focusable widget so the keyboard isn't stuck.
+    function mm:_sync_continue()
+        local cont = self.root.children[1]
+        local now_disabled = not app_has_game()
+        if cont.disabled == now_disabled then return end
+        cont.disabled = now_disabled
+        if now_disabled and self.root.focused_child == cont then
+            local next_w = widget.focus_next(self.root.children, cont)
+            if next_w and next_w ~= cont then
+                cont.focused = false
+                self.root.focused_child = next_w
+                next_w.focused = true
             end
         end
     end
 
     function mm:render()
-        self:_layout()
+        self:_sync_continue()
         draw_bg("menu_bg")
         draw_region("logo", self.logo_x, self.logo_y, {
             scale_x = LOGO_W / 256.0,
             scale_y = LOGO_H / 64.0,
         })
-        for _, w in ipairs(self.widgets) do w:draw() end
-    end
-
-    function mm:keydown(name)
-        self.focused_widget = widget.dispatch_keydown(
-            self.widgets, self.focused_widget, name)
-    end
-
-    function mm:mousemove(x, y)
-        dispatch_mousemove(self.widgets, x, y)
-    end
-
-    function mm:mousedown(x, y, button)
-        self.focused_widget = dispatch_mousedown(
-            self.widgets, self.focused_widget, x, y, button)
-    end
-
-    function mm:mouseup(x, y, button)
-        dispatch_mouse(self.widgets, "mouseup", x, y, button)
+        self.root:draw()
     end
 
     return mm
@@ -202,19 +150,23 @@ end
 --
 -- Sample settings wired via opt_set / opt_get + the engine's
 -- music_volume binding. Used as the dogfood scene for Checkbox + Slider
--- + Label.
+-- + Label + LineEdit.
 --
 -- - "Music" checkbox toggles persisted `music_on` and mutes/restores
 --   the music volume immediately.
 -- - "Master volume" slider sets persisted `music_vol` and applies it
 --   live whenever Music is on.
+-- - "Player name" LineEdit persists the typed text via opt_set.
 --
 -- Options are saved to sdlfun.dat when the user presses BACK / Esc /
 -- Backspace; on_change runs only in-memory + applies the live audio
 -- effect so dragging the slider doesn't thrash the disk.
 
 function M.options()
-    local opt = { transparent = true }   -- main menu renders behind us
+    local opt = {
+        transparent = true,                -- main menu renders behind us
+        root        = widget.panel({ x = 0, y = 0 }),
+    }
     local vw, vh = view_size()
     opt.vw, opt.vh = vw, vh
     opt.title_y = -vh * 0.5 + PAD
@@ -302,10 +254,14 @@ function M.options()
     local back = make_menu_button(-BTN_W * 0.5, row_y, BTN_W, BTN_H,
                                   "BACK", commit_and_pop)
 
-    opt.widgets        = { music_check, vol_label, music_slider,
-                           name_label, name_edit, back }
-    opt.focused_widget = music_check
-    music_check.focused = true
+    opt.root:add(music_check)
+    opt.root:add(vol_label)
+    opt.root:add(music_slider)
+    opt.root:add(name_label)
+    opt.root:add(name_edit)
+    opt.root:add(back)
+    -- :add auto-focused music_check (first focusable). That's the
+    -- desired default, so no override.
 
     function opt:render()
         draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
@@ -316,52 +272,25 @@ function M.options()
             align = ALIGN_TOP + ALIGN_CENTER,
             color = { 1, 1, 1 },
         })
-        for _, w in ipairs(self.widgets) do w:draw() end
-    end
-
-    function opt:update(dt)
-        widget.dispatch_update(self.widgets, dt)
+        self.root:draw()
     end
 
     function opt:keydown(name)
         -- Esc commits + leaves. Backspace also commits — UNLESS the
         -- focused widget consumes it (LineEdit eats Backspace to delete
-        -- a character). dispatch_keydown returns the same widget when
-        -- the keypress was absorbed, so we differentiate by trying the
-        -- widget first and only popping if the keydown bubbles back.
+        -- a character). Probe the focused leaf directly so we can tell
+        -- "consumed" from "ignored".
         if name == "escape" then
             commit_and_pop()
             return
         end
         if name == "backspace" then
-            if self.focused_widget and self.focused_widget.keydown
-               and self.focused_widget:keydown(name) then
-                return       -- LineEdit consumed it
-            end
+            local fc = self.root.focused_child
+            if fc and fc.keydown and fc:keydown(name) then return end
             commit_and_pop()
             return
         end
-        self.focused_widget = widget.dispatch_keydown(
-            self.widgets, self.focused_widget, name)
-    end
-
-    function opt:textinput(ch)
-        if self.focused_widget and self.focused_widget.textinput then
-            self.focused_widget:textinput(ch)
-        end
-    end
-
-    function opt:mousemove(x, y)
-        dispatch_mousemove(self.widgets, x, y)
-    end
-
-    function opt:mousedown(x, y, button)
-        self.focused_widget = dispatch_mousedown(
-            self.widgets, self.focused_widget, x, y, button)
-    end
-
-    function opt:mouseup(x, y, button)
-        dispatch_mouse(self.widgets, "mouseup", x, y, button)
+        self.root:keydown(name)
     end
 
     return opt
@@ -374,9 +303,12 @@ end
 -- and main.cpp picks it up the same frame).
 
 function M.confirm_dialog(title, message, on_ok)
-    local dlg = { transparent = true }
-    dlg.title   = title
-    dlg.message = message
+    local dlg = {
+        transparent = true,
+        root        = widget.panel({ x = 0, y = 0 }),
+        title       = title,
+        message     = message,
+    }
 
     -- Dialog rect + button rects.
     local rx, ry = -DLG_W * 0.5, -DLG_H * 0.5
@@ -401,9 +333,14 @@ function M.confirm_dialog(title, message, on_ok)
     ok.text_align     = ALIGN_CENTER + ALIGN_MIDDLE
     cancel.text_align = ALIGN_CENTER + ALIGN_MIDDLE
 
-    dlg.widgets        = { ok, cancel }
-    dlg.focused_widget = cancel       -- Cancel is the safer default.
-    cancel.focused     = true
+    dlg.root:add(ok)
+    dlg.root:add(cancel)
+
+    -- :add auto-focused OK (first focusable). Override to Cancel — the
+    -- safer default for a destructive prompt.
+    ok.focused                = false
+    dlg.root.focused_child    = cancel
+    cancel.focused            = true
 
     function dlg:render()
         draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
@@ -422,7 +359,7 @@ function M.confirm_dialog(title, message, on_ok)
             scale = SCALE_DIALOG_MSG, font = "button_font",
             align = ALIGN_MIDDLE + ALIGN_CENTER, color = { 1, 1, 1 },
         })
-        for _, w in ipairs(self.widgets) do w:draw() end
+        self.root:draw()
     end
 
     function dlg:keydown(name)
@@ -430,21 +367,7 @@ function M.confirm_dialog(title, message, on_ok)
             pop_and_fire(false)
             return
         end
-        self.focused_widget = widget.dispatch_keydown(
-            self.widgets, self.focused_widget, name)
-    end
-
-    function dlg:mousemove(x, y)
-        dispatch_mousemove(self.widgets, x, y)
-    end
-
-    function dlg:mousedown(x, y, button)
-        self.focused_widget = dispatch_mousedown(
-            self.widgets, self.focused_widget, x, y, button)
-    end
-
-    function dlg:mouseup(x, y, button)
-        dispatch_mouse(self.widgets, "mouseup", x, y, button)
+        self.root:keydown(name)
     end
 
     return dlg
