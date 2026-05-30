@@ -928,8 +928,13 @@ int main(int argc, char *argv[])
     AssetRegistry assetReg;
     assetRegInit(&assetReg);
     ScriptSystem script;
+    /* Per-user persistence path: AppData\SDLFun\sdlfun.dat (Windows) or
+       ~/.config/SDLFun/sdlfun.dat (Unix). Falls back to next-to-exe on
+       Win98 (no %APPDATA%). Static so the buffer outlives script. */
+    static char optPath[512];
+    scriptResolveConfigPath("SDLFun", "sdlfun.dat", optPath, sizeof(optPath));
     scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, &assetReg,
-               &app.menuTex, &blurCache, "sdlfun.dat");
+               &app.menuTex, &blurCache, optPath);
     scriptExtRegister(&script);          /* SDLFun-only: ent_activate, conExecute */
     appExtRegister(&script);             /* SDLFun-only: app_new_game / continue / quit / has_game */
     scriptLoadAssets(&script, "assets.lua");
