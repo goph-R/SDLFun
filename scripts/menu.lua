@@ -187,11 +187,11 @@ function M.options()
 
     local music_check = widget.checkbox{
         x = COL_X, y = row_y, width = COL_W, height = BTN_H,
-        text  = "Music",
-        font  = "button_font",
-        scale = SCALE_BUTTON,
-        color = BTN_FG_COLOR,
-        value = music_on,
+        text       = "Music",
+        font       = "button_font",
+        text_scale = SCALE_BUTTON,
+        color      = BTN_FG_COLOR,
+        value      = music_on,
         on_change = function(self, v)
             opt_set("music_on", v)
             music_volume(v and music_slider.value or 0.0)
@@ -201,11 +201,11 @@ function M.options()
 
     local vol_label = widget.label{
         x = COL_X, y = row_y, width = COL_W, height = 22,
-        text  = "Master volume",
-        font  = "button_font",
-        scale = SCALE_BUTTON,
-        color = BTN_FG_COLOR,
-        align = ALIGN_LEFT + ALIGN_MIDDLE,
+        text       = "Master volume",
+        font       = "button_font",
+        text_scale = SCALE_BUTTON,
+        color      = BTN_FG_COLOR,
+        align      = ALIGN_LEFT + ALIGN_MIDDLE,
     }
     row_y = row_y + 22 + 4
 
@@ -221,20 +221,20 @@ function M.options()
 
     local name_label = widget.label{
         x = COL_X, y = row_y, width = COL_W, height = 22,
-        text  = "Player name",
-        font  = "button_font",
-        scale = SCALE_BUTTON,
-        color = BTN_FG_COLOR,
-        align = ALIGN_LEFT + ALIGN_MIDDLE,
+        text       = "Player name",
+        font       = "button_font",
+        text_scale = SCALE_BUTTON,
+        color      = BTN_FG_COLOR,
+        align      = ALIGN_LEFT + ALIGN_MIDDLE,
     }
     row_y = row_y + 22 + 4
 
     local name_edit = widget.line_edit{
         x = COL_X, y = row_y, width = COL_W, height = 28,
-        text = player_name,
-        font = "button_font",
-        scale = SCALE_BUTTON,
-        color = BTN_FG_COLOR,
+        text       = player_name,
+        font       = "button_font",
+        text_scale = SCALE_BUTTON,
+        color      = BTN_FG_COLOR,
         bg_color = {
             enabled  = { 0.10, 0.10, 0.14, 0.85 },
             disabled = { 0.05, 0.05, 0.08, 0.6 },
