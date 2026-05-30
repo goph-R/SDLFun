@@ -6,8 +6,14 @@
 -- only defines what's actually scene-specific (enter to build widgets,
 -- render for backdrop / title art, keydown for Esc handling).
 
-local scene  = require "engine.scene"
-local widget = require "engine.widget"
+local scene      = require "engine.scene"
+local widget     = require "engine.widget"
+local transition = require "engine.transition"
+
+-- Tunables for dialog/options slide-in. Same duration across all so
+-- the menu's modal layer has a consistent rhythm.
+local DLG_SLIDE_DUR    = 0.3
+local OPT_SLIDE_DUR    = 0.3
 
 local M = {}
 
@@ -94,18 +100,23 @@ function M.main_menu()
                     scene.push(M.confirm_dialog(
                         "NEW GAME",
                         "Start a new game? Progress will be lost.",
-                        app_new_game))
+                        app_new_game),
+                        transition.slide("bottom", DLG_SLIDE_DUR))
                 else
                     app_new_game()
                 end
             end))
 
         self.root:add(make_menu_button(x, row(2), BTN_W, BTN_H, "OPTIONS",
-            function() scene.push(M.options()) end))
+            function()
+                scene.push(M.options(),
+                           transition.slide("top", OPT_SLIDE_DUR))
+            end))
 
         self.root:add(make_menu_button(x, row(3), BTN_W, BTN_H, "EXIT",
             function()
-                scene.push(M.confirm_dialog("EXIT", "Exit to system?", app_quit))
+                scene.push(M.confirm_dialog("EXIT", "Exit to system?", app_quit),
+                           transition.slide("bottom", DLG_SLIDE_DUR))
             end))
 
         -- Title music starts on first menu entry; later re-enters
@@ -248,7 +259,8 @@ function M.options()
 
     local function commit_and_pop()
         opt_save()
-        scene.pop()
+        -- Mirror the in-slide: same edge, same duration.
+        scene.pop(transition.slide("top", OPT_SLIDE_DUR))
     end
 
     local back = make_menu_button(-BTN_W * 0.5, row_y, BTN_W, BTN_H,
@@ -264,9 +276,19 @@ function M.options()
     -- desired default, so no override.
 
     function opt:render()
+        -- The OPTIONS title is drawn directly (not in root), so apply
+        -- the root's animated offset by hand so it slides with the
+        -- widgets below. Dim alpha follows the slide progress so it
+        -- doesn't pop in at full opacity while the title is still
+        -- off-screen.
+        local rx = self.root.x or 0
+        local ry = self.root.y or 0
+        local d = math.max(math.abs(rx) / self.vw, math.abs(ry) / self.vh)
+        if d > 1 then d = 1 end
+        local slide_progress = 1 - d
         draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
-                  { color = { 0, 0, 0, 0.5 } })
-        draw_text("OPTIONS", 0, self.title_y, {
+                  { color = { 0, 0, 0, 0.5 * slide_progress } })
+        draw_text("OPTIONS", rx, self.title_y + ry, {
             scale = SCALE_MENU_TITLE,
             font  = "menu_title_font",
             align = ALIGN_TOP + ALIGN_CENTER,
@@ -320,9 +342,22 @@ function M.confirm_dialog(title, message, on_ok)
     dlg.vw, dlg.vh = vw, vh
 
     -- pop + (optional) fire pattern shared by OK / Cancel / Esc.
+    -- With a slide-out, on_ok needs to wait until after the dialog has
+    -- actually left the screen — firing it during the slide would let
+    -- the new game / quit / etc. happen behind the still-visible
+    -- dialog. Hand the action off to dlg.on_exit_fire and let :exit
+    -- (called by scene.pop's on_action_done) fire it.
     local function pop_and_fire(choose_ok)
-        scene.pop()
-        if choose_ok and on_ok then on_ok() end
+        if choose_ok and on_ok then dlg.on_exit_fire = on_ok end
+        scene.pop(transition.slide("bottom", DLG_SLIDE_DUR))
+    end
+
+    function dlg:exit()
+        if self.on_exit_fire then
+            local fn = self.on_exit_fire
+            self.on_exit_fire = nil
+            fn()
+        end
     end
 
     local ok = make_menu_button(bx0, by, DLG_BTN_W, DLG_BTN_H, "OK",
@@ -343,19 +378,30 @@ function M.confirm_dialog(title, message, on_ok)
     cancel.focused            = true
 
     function dlg:render()
+        -- Slide offset from root. Buttons inside root slide naturally;
+        -- the body bg / outline / title / message are direct draws so
+        -- we apply (ox, oy) by hand. Dim alpha is tied to slide
+        -- progress so the backdrop fades in / out alongside the body
+        -- instead of popping in at 0.5 from frame 1.
+        local ox = self.root.x or 0
+        local oy = self.root.y or 0
+        local d  = math.max(math.abs(ox) / self.vw, math.abs(oy) / self.vh)
+        if d > 1 then d = 1 end
+        local slide_progress = 1 - d
         draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
-                  { color = { 0, 0, 0, 0.5 } })
+                  { color = { 0, 0, 0, 0.5 * slide_progress } })
         local r = self.rect
         -- Panel body. dialog_bg is a 32×32 tile asset in the original C
         -- menu; for now fill flat — wire the tile later by registering
         -- it as a slice-carrying region.
-        draw_quad(r.x, r.y, r.w, r.h, { color = { 0.14, 0.14, 0.22, 1.0 } })
-        widget.draw_outline(r.x, r.y, r.w, r.h, 2, { 0.9, 0.9, 1.0, 0.5 })
-        draw_text(self.title, r.x + r.w * 0.5, r.y + DLG_PAD, {
+        draw_quad(r.x + ox, r.y + oy, r.w, r.h, { color = { 0.14, 0.14, 0.22, 1.0 } })
+        widget.draw_outline(r.x + ox, r.y + oy, r.w, r.h,
+                            2, { 0.9, 0.9, 1.0, 0.5 })
+        draw_text(self.title, r.x + r.w * 0.5 + ox, r.y + DLG_PAD + oy, {
             scale = SCALE_DIALOG_TITLE, font = "dialog_title",
             align = ALIGN_TOP + ALIGN_CENTER, color = { 1, 1, 1 },
         })
-        draw_text(self.message, r.x + r.w * 0.5, r.y + r.h * 0.5, {
+        draw_text(self.message, r.x + r.w * 0.5 + ox, r.y + r.h * 0.5 + oy, {
             scale = SCALE_DIALOG_MSG, font = "button_font",
             align = ALIGN_MIDDLE + ALIGN_CENTER, color = { 1, 1, 1 },
         })
