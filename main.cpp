@@ -990,7 +990,7 @@ int main(int argc, char *argv[])
                 if (event.type == SDL_KEYDOWN) {
                     const char *name = SDL_GetKeyName(event.key.keysym.sym);
                     scriptCallKeyDown(&script, name ? name : "");
-                    /* Fire onTextinput after onKeydown when the key
+                    /* Fire onTextInput after onKeyDown when the key
                        produced a printable ASCII character. ASCII only
                        for v1; non-ASCII unicode is dropped. */
                     Uint16 uni = event.key.keysym.unicode;

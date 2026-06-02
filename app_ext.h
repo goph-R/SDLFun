@@ -25,14 +25,14 @@
 
 static AppState *g_appExt_app = NULL;
 
-static int scr_app_new_game(lua_State *L)
+static int scrAppNewGame(lua_State *L)
 {
     (void)L;
     if (g_appExt_app) g_appExt_app->pendingAction = PENDING_NEW_GAME;
     return 0;
 }
 
-static int scr_app_continue(lua_State *L)
+static int scrAppContinue(lua_State *L)
 {
     (void)L;
     if (g_appExt_app && g_appExt_app->game) {
@@ -43,20 +43,20 @@ static int scr_app_continue(lua_State *L)
     return 0;
 }
 
-static int scr_app_quit(lua_State *L)
+static int scrAppQuit(lua_State *L)
 {
     (void)L;
     if (g_appExt_app) g_appExt_app->pendingAction = PENDING_QUIT;
     return 0;
 }
 
-static int scr_app_has_game(lua_State *L)
+static int scrAppHasGame(lua_State *L)
 {
     lua_pushboolean(L, g_appExt_app && g_appExt_app->game != NULL);
     return 1;
 }
 
-static int scr_app_enter_menu(lua_State *L)
+static int scrAppEnterMenu(lua_State *L)
 {
     (void)L;
     if (g_appExt_app) g_appExt_app->mode = MODE_MENU;
@@ -67,11 +67,11 @@ static int scr_app_enter_menu(lua_State *L)
    scriptInit (and after script_ext.h's scriptExtRegister). */
 static void appExtRegister(ScriptSystem *s)
 {
-    lua_register(s->L, "appNewGame",  scr_app_new_game);
-    lua_register(s->L, "appContinue",  scr_app_continue);
-    lua_register(s->L, "appQuit",      scr_app_quit);
-    lua_register(s->L, "appHasGame",  scr_app_has_game);
-    lua_register(s->L, "appEnterMenu",scr_app_enter_menu);
+    lua_register(s->L, "appNewGame",  scrAppNewGame);
+    lua_register(s->L, "appContinue",  scrAppContinue);
+    lua_register(s->L, "appQuit",      scrAppQuit);
+    lua_register(s->L, "appHasGame",  scrAppHasGame);
+    lua_register(s->L, "appEnterMenu",scrAppEnterMenu);
 }
 
 /* Set / clear the AppState pointer the bindings reach into.

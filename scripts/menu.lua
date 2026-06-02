@@ -2,9 +2,9 @@
 --
 -- Each constructor returns a "scene" table (see engine/scene.lua) whose
 -- widgets live inside a `root` panel. engine.scene's dispatchers auto-
--- forward update / mouse / key / textinput into root, so each scene
+-- forward update / mouse / key / textInput into root, so each scene
 -- only defines what's actually scene-specific (enter to build widgets,
--- render for backdrop / title art, keydown for Esc handling).
+-- render for backdrop / title art, keyDown for Esc handling).
 
 local scene      = require "engine.scene"
 local widget     = require "engine.widget"
@@ -297,7 +297,7 @@ function M.options()
         self.root:draw()
     end
 
-    function opt:keydown(name)
+    function opt:keyDown(name)
         -- Esc commits + leaves. Backspace also commits — UNLESS the
         -- focused widget consumes it (LineEdit eats Backspace to delete
         -- a character). Probe the focused leaf directly so we can tell
@@ -308,11 +308,11 @@ function M.options()
         end
         if name == "backspace" then
             local fc = self.root.focusedChild
-            if fc and fc.keydown and fc:keydown(name) then return end
+            if fc and fc.keyDown and fc:keyDown(name) then return end
             commitAndPop()
             return
         end
-        self.root:keydown(name)
+        self.root:keyDown(name)
     end
 
     return opt
@@ -408,12 +408,12 @@ function M.confirmDialog(title, message, onOk)
         self.root:draw()
     end
 
-    function dlg:keydown(name)
+    function dlg:keyDown(name)
         if name == "escape" then
             popAndFire(false)
             return
         end
-        self.root:keydown(name)
+        self.root:keyDown(name)
     end
 
     return dlg

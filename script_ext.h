@@ -23,7 +23,7 @@ static EntityList *g_scriptExt_entities = NULL;
    switch targets. Logs a warning (rather than crashing) if called while
    no game is active — possible if a menu-side script gets the binding
    wrong. */
-static int scr_ent_activate_ext(lua_State *L)
+static int scrEntActivateExt(lua_State *L)
 {
     const char *target = luaL_checkstring(L, 1);
     if (g_scriptExt_entities) {
@@ -38,19 +38,19 @@ static int scr_ent_activate_ext(lua_State *L)
    ScriptSystem. Call once after scriptInit. */
 static void scriptExtRegister(ScriptSystem *s)
 {
-    lua_register(s->L, "entActivate", scr_ent_activate_ext);
+    lua_register(s->L, "entActivate", scrEntActivateExt);
 }
 
 /* Execute the console's command buffer as a Lua chunk. Used by console.h
    on Enter — bridges SDLFun's dev console to the engine's Lua runtime.
    Find5 doesn't have a dev console so this lives here, not in SOOB-Core.
-   scr_traceback comes from script.h (same TU; static functions are visible
+   scrTraceback comes from script.h (same TU; static functions are visible
    between headers that get textually included together). */
 static void conExecute(Console *c, ScriptSystem *s)
 {
     conLogf("> %s\n", c->cmd);
     lua_State *L = s->L;
-    lua_pushcfunction(L, scr_traceback);
+    lua_pushcfunction(L, scrTraceback);
     int tbidx = lua_gettop(L);
     if (luaL_loadstring(L, c->cmd) != 0) {
         conLogf("%s\n", lua_tostring(L, -1));

@@ -10,7 +10,7 @@
 local scene = require "engine.scene"
 local menu  = require "menu"
 
--- Wire onUpdate / onRender / onKeydown / onMousedown / etc. straight
+-- Wire onUpdate / onRender / onKeyDown / onMouseDown / etc. straight
 -- to the scene dispatcher. Anything that needs to happen outside the
 -- scene system (FPS counter, global music tick, etc.) can override one
 -- of these AFTER installHooks and call the matching scene.dispatch_*
