@@ -910,13 +910,13 @@ int main(int argc, char *argv[])
     conBind(&con);
 
     /* App state machine — created early so its menuTex is available to
-       scriptInit as the shared texture cache (Lua draw_region / draw_bg /
-       draw_blur all need a cache; reusing app.menuTex means no extra
+       scriptInit as the shared texture cache (Lua drawRegion / drawBg /
+       drawBlur all need a cache; reusing app.menuTex means no extra
        cache instance and one set of GL textures across menu + scripts). */
     AppState app;
     appInit(&app, SCREEN_W, SCREEN_H, &ui, NULL, NULL, &snd, &sndLib, &mus, &musLib);
 
-    /* App-level blur cache for Lua draw_blur. Separate from menuTex
+    /* App-level blur cache for Lua drawBlur. Separate from menuTex
        because TexBlurCache stores downsampled summaries, not full
        texture uploads. */
     TexBlurCache blurCache;
@@ -936,7 +936,7 @@ int main(int argc, char *argv[])
     scriptInit(&script, &ui, &snd, &sndLib, &mus, &musLib, &assetReg,
                &app.menuTex, &blurCache, optPath);
     scriptExtRegister(&script);          /* SDLFun-only: ent_activate, conExecute */
-    appExtRegister(&script);             /* SDLFun-only: app_new_game / continue / quit / has_game */
+    appExtRegister(&script);             /* SDLFun-only: appNewGame / continue / quit / has_game */
     scriptLoadAssets(&script, "assets.lua");
     scriptInstallConsolePrint(&script);  /* override Lua print → console */
 
@@ -949,7 +949,7 @@ int main(int argc, char *argv[])
 
     /* Run the entry script ONCE at app boot — it installs the scene-stack
        hooks and pushes the initial menu scene. Per-session work (HUD
-       welcome message, etc.) lives in on_start which gameInit fires. */
+       welcome message, etc.) lives in onStart which gameInit fires. */
     scriptRunFile(&script, "scripts/main.lua");
 
     /* Game struct is allocated once on the stack; gameInited tracks
@@ -990,7 +990,7 @@ int main(int argc, char *argv[])
                 if (event.type == SDL_KEYDOWN) {
                     const char *name = SDL_GetKeyName(event.key.keysym.sym);
                     scriptCallKeyDown(&script, name ? name : "");
-                    /* Fire on_textinput after on_keydown when the key
+                    /* Fire onTextinput after onKeydown when the key
                        produced a printable ASCII character. ASCII only
                        for v1; non-ASCII unicode is dropped. */
                     Uint16 uni = event.key.keysym.unicode;
@@ -1233,7 +1233,7 @@ int main(int argc, char *argv[])
         float lookX = look.x, lookY = look.y, lookZ = look.z;
 
         /* Push camera pose to OpenAL so positioned sounds (sndPlayAt /
-           snd_play with coords) pan and attenuate correctly. Up vector
+           soundPlay with coords) pan and attenuate correctly. Up vector
            is world Y; the strafe roll above is a visual flourish only,
            we don't roll the listener with it. */
         {
@@ -1351,13 +1351,13 @@ int main(int argc, char *argv[])
             uiText(&ui, halfW - pad, -halfH + pad, white, fps,
                    16.0f / 28.0f, UI_ALIGN_TOP | UI_ALIGN_RIGHT);   /* ~16 vpx */
 
-            /* Transient script-driven message (ui_show_message from Lua). */
+            /* Transient script-driven message (uiShowMessage from Lua). */
             uiDrawMessage(&ui);
 
             /* Dev console — drawn last so it overlays the HUD. Resolve the
                tiled background texture up here so console.h has no asset
                registry / texture-cache dependency. */
-            const char *cbgPath = assetRegFindTexture(&assetReg, "dialogBg");
+            const char *cbgPath = assetRegFindTexture(&assetReg, "dialog_bg");
             GLuint conBgTex = cbgPath
                 ? texCacheGet(&app.menuTex, cbgPath, GL_REPEAT) : 0;
             conRender(&con, &ui, conBgTex);

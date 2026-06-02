@@ -182,7 +182,7 @@ static int gameInit(Game *g,
 
     /* main.lua is now loaded once at app boot (see main.cpp), not per
        session — the Lua menu state outlives gameInit/gameFree cycles.
-       on_start still fires here so per-session setup (welcome message,
+       onStart still fires here so per-session setup (welcome message,
        initial switch activations) lands on frame 0. */
     scriptCall(script, "onStart");
 

@@ -8,13 +8,13 @@
  * (which in turn references script_ext.h's scriptExtSetEntities).
  *
  * Bindings:
- *   app_new_game()        -> sets pendingAction = PENDING_NEW_GAME
- *   app_continue()        -> sets pendingAction = PENDING_CONTINUE
+ *   appNewGame()        -> sets pendingAction = PENDING_NEW_GAME
+ *   appContinue()        -> sets pendingAction = PENDING_CONTINUE
  *                            (no-op if no game session yet)
- *   app_quit()            -> sets pendingAction = PENDING_QUIT
- *   app_has_game() -> bool  whether a game session has been created
+ *   appQuit()            -> sets pendingAction = PENDING_QUIT
+ *   appHasGame() -> bool  whether a game session has been created
  *                          and is still alive (drives CONTINUE enable)
- *   app_enter_menu()      -> flips mode back to MODE_MENU (Lua side
+ *   appEnterMenu()      -> flips mode back to MODE_MENU (Lua side
  *                            usually drives this implicitly by Esc
  *                            from within the game; provided for
  *                            symmetry with the C transition)
@@ -71,7 +71,7 @@ static void appExtRegister(ScriptSystem *s)
     lua_register(s->L, "appContinue",  scr_app_continue);
     lua_register(s->L, "appQuit",      scr_app_quit);
     lua_register(s->L, "appHasGame",  scr_app_has_game);
-    lua_register(s->L, "app_enter_menu",scr_app_enter_menu);
+    lua_register(s->L, "appEnterMenu",scr_app_enter_menu);
 }
 
 /* Set / clear the AppState pointer the bindings reach into.

@@ -85,7 +85,7 @@ static void appInit(AppState *app, int screenW, int screenH,
     app->music    = music;
     app->musLib   = musLib;
     texCacheInit(&app->menuTex);
-    /* Title music is now started by Lua's main_menu:enter() — no need
+    /* Title music is now started by Lua's mainMenu:enter() — no need
        to call musicPlay here. The Lua side has the asset name and the
        binding. */
 }
@@ -97,8 +97,8 @@ static void appShutdown(AppState *app)
 
 /* Transition from MODE_GAME back to MODE_MENU. The Lua scene stack
    stays intact across the mode flip — the main menu sits at the bottom
-   throughout — so this is just a mode toggle. Lua's main_menu picks up
-   the new app_has_game() state on its next render. */
+   throughout — so this is just a mode toggle. Lua's mainMenu picks up
+   the new appHasGame() state on its next render. */
 static void appEnterMenu(AppState *app)
 {
     app->mode = MODE_MENU;
@@ -133,7 +133,7 @@ static void drawLoadingScreen(AppState *app)
     float vw = uiGetWidth(ui);
     float vh = uiGetHeight(ui);
     UiRect full = uiRectMake(-vw * 0.5f, -vh * 0.5f, vw, vh);
-    GLuint tex = appGetMenuTex(app, "loadingBg", GL_CLAMP_TO_EDGE);
+    GLuint tex = appGetMenuTex(app, "loading_bg", GL_CLAMP_TO_EDGE);
     if (tex) {
         float srcAspect = 2.0f / 1.0f;
         float dstAspect = vw / vh;
@@ -168,7 +168,7 @@ static void drawLoadingScreen(AppState *app)
        targeted ~40 vpx; in the new convention that's 40/28. */
     uiText(ui, halfW - 30.0f, halfH - 30.0f,
            fg, "LOADING", 40.0f / 28.0f,
-           UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "buttonFont");
+           UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "button_font");
     uiEnd(ui);
 
     SDL_GL_SwapBuffers();
