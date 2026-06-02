@@ -38,7 +38,7 @@ static int scr_app_continue(lua_State *L)
     if (g_appExt_app && g_appExt_app->game) {
         g_appExt_app->pendingAction = PENDING_CONTINUE;
     } else if (g_appExt_app) {
-        conLogf("app_continue: no game session to resume — ignored\n");
+        conLogf("appContinue: no game session to resume — ignored\n");
     }
     return 0;
 }
@@ -67,10 +67,10 @@ static int scr_app_enter_menu(lua_State *L)
    scriptInit (and after script_ext.h's scriptExtRegister). */
 static void appExtRegister(ScriptSystem *s)
 {
-    lua_register(s->L, "app_new_game",  scr_app_new_game);
-    lua_register(s->L, "app_continue",  scr_app_continue);
-    lua_register(s->L, "app_quit",      scr_app_quit);
-    lua_register(s->L, "app_has_game",  scr_app_has_game);
+    lua_register(s->L, "appNewGame",  scr_app_new_game);
+    lua_register(s->L, "appContinue",  scr_app_continue);
+    lua_register(s->L, "appQuit",      scr_app_quit);
+    lua_register(s->L, "appHasGame",  scr_app_has_game);
     lua_register(s->L, "app_enter_menu",scr_app_enter_menu);
 }
 

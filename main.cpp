@@ -1357,7 +1357,7 @@ int main(int argc, char *argv[])
             /* Dev console — drawn last so it overlays the HUD. Resolve the
                tiled background texture up here so console.h has no asset
                registry / texture-cache dependency. */
-            const char *cbgPath = assetRegFindTexture(&assetReg, "dialog_bg");
+            const char *cbgPath = assetRegFindTexture(&assetReg, "dialogBg");
             GLuint conBgTex = cbgPath
                 ? texCacheGet(&app.menuTex, cbgPath, GL_REPEAT) : 0;
             conRender(&con, &ui, conBgTex);

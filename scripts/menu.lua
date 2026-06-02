@@ -42,7 +42,7 @@ local SCALE_DIALOG_TITLE = 0.90   -- dialog_title (target ~36 vpx)
 local SCALE_MENU_TITLE   = 1.00   -- menu_title_font (target ~40 vpx)
 
 -- Shared button styling — flat-color backgrounds keyed by state. Once
--- button art lands in assets.lua, swap to bg_up / bg_down / bg_disabled
+-- button art lands in assets.lua, swap to bgUp / bgDown / bgDisabled
 -- (region names with slice metadata) on the same widget.button calls.
 local BTN_BG_COLOR = {
     up       = { 0.14, 0.14, 0.22, 0.75 },
@@ -54,31 +54,31 @@ local BTN_FG_COLOR = { 0.90, 0.90, 0.95, 1.0 }
 
 -- One factory for every button in the menu — same look, just different
 -- label / position / action.
-local function make_menu_button(x, y, w, h, label, on_click)
+local function makeMenuButton(x, y, w, h, label, onClick)
     return widget.button({
         x = x, y = y, width = w, height = h,
         text       = label,
         font       = "button_font",
-        text_scale = SCALE_BUTTON,
-        text_align = ALIGN_MIDDLE + ALIGN_LEFT,
-        text_color = BTN_FG_COLOR,
-        bg_color   = BTN_BG_COLOR,
-        on_click   = on_click,
+        textScale = SCALE_BUTTON,
+        textAlign = ALIGN_MIDDLE + ALIGN_LEFT,
+        textColor = BTN_FG_COLOR,
+        bgColor   = BTN_BG_COLOR,
+        onClick   = onClick,
     })
 end
 
 -- ---- Main menu ---------------------------------------------------------
 
-function M.main_menu()
+function M.mainMenu()
     local mm = { root = widget.panel({ x = 0, y = 0 }) }
 
     function mm:enter()
-        local vw, vh = view_size()
+        local vw, vh = viewSize()
         local hw, hh = vw * 0.5, vh * 0.5
 
         -- Logo at top-left.
-        self.logo_x = -hw + PAD
-        self.logo_y = -hh + PAD
+        self.logoX = -hw + PAD
+        self.logoY = -hh + PAD
 
         -- Button column under the logo.
         local x = -hw + PAD
@@ -86,70 +86,70 @@ function M.main_menu()
         local row = function(i) return y + (BTN_H + BTN_GAP) * i end
 
         -- CONTINUE — disabled flag set BEFORE :add so the panel's auto-
-        -- focus skips it (is_focusable rejects disabled). The next
+        -- focus skips it (isFocusable rejects disabled). The next
         -- focusable child (NEW GAME) then claims focus, matching the
-        -- old widget.focus_next(nil) behaviour.
-        local continue = make_menu_button(x, row(0), BTN_W, BTN_H, "CONTINUE",
-            function() app_continue() end)
-        continue.disabled = not app_has_game()
+        -- old widget.focusNext(nil) behaviour.
+        local continue = makeMenuButton(x, row(0), BTN_W, BTN_H, "CONTINUE",
+            function() appContinue() end)
+        continue.disabled = not appHasGame()
         self.root:add(continue)
 
-        self.root:add(make_menu_button(x, row(1), BTN_W, BTN_H, "NEW GAME",
+        self.root:add(makeMenuButton(x, row(1), BTN_W, BTN_H, "NEW GAME",
             function()
-                if app_has_game() then
-                    scene.push(M.confirm_dialog(
+                if appHasGame() then
+                    scene.push(M.confirmDialog(
                         "NEW GAME",
                         "Start a new game? Progress will be lost.",
-                        app_new_game),
+                        appNewGame),
                         transition.slide("bottom", DLG_SLIDE_DUR))
                 else
-                    app_new_game()
+                    appNewGame()
                 end
             end))
 
-        self.root:add(make_menu_button(x, row(2), BTN_W, BTN_H, "OPTIONS",
+        self.root:add(makeMenuButton(x, row(2), BTN_W, BTN_H, "OPTIONS",
             function()
                 scene.push(M.options(),
                            transition.slide("top", OPT_SLIDE_DUR))
             end))
 
-        self.root:add(make_menu_button(x, row(3), BTN_W, BTN_H, "EXIT",
+        self.root:add(makeMenuButton(x, row(3), BTN_W, BTN_H, "EXIT",
             function()
-                scene.push(M.confirm_dialog("EXIT", "Exit to system?", app_quit),
+                scene.push(M.confirmDialog("EXIT", "Exit to system?", appQuit),
                            transition.slide("bottom", DLG_SLIDE_DUR))
             end))
 
         -- Title music starts on first menu entry; later re-enters
         -- crossfade smoothly.
-        music_play("title", 1.0, true)
+        musicPlay("title", 1.0, true)
     end
 
-    -- CONTINUE's enabled flag tracks app_has_game() — that becomes true
+    -- CONTINUE's enabled flag tracks appHasGame() — that becomes true
     -- after the first New Game and stays true through subsequent
     -- Esc → menu → Continue roundtrips. Sync once per frame from render;
     -- if focus was sitting on CONTINUE and it just got disabled, slide
     -- focus to the next focusable widget so the keyboard isn't stuck.
     function mm:_sync_continue()
         local cont = self.root.children[1]
-        local now_disabled = not app_has_game()
-        if cont.disabled == now_disabled then return end
-        cont.disabled = now_disabled
-        if now_disabled and self.root.focused_child == cont then
-            local next_w = widget.focus_next(self.root.children, cont)
-            if next_w and next_w ~= cont then
+        local nowDisabled = not appHasGame()
+        if cont.disabled == nowDisabled then return end
+        cont.disabled = nowDisabled
+        if nowDisabled and self.root.focusedChild == cont then
+            local nextW = widget.focusNext(self.root.children, cont)
+            if nextW and nextW ~= cont then
                 cont.focused = false
-                self.root.focused_child = next_w
-                next_w.focused = true
+                self.root.focusedChild = nextW
+                nextW.focused = true
             end
         end
     end
 
     function mm:render()
         self:_sync_continue()
-        draw_bg("menu_bg")
-        draw_region("logo", self.logo_x, self.logo_y, {
-            scale_x = LOGO_W / 256.0,
-            scale_y = LOGO_H / 64.0,
+        drawBg("menu_bg")
+        drawRegion("logo", self.logoX, self.logoY, {
+            scaleX = LOGO_W / 256.0,
+            scaleY = LOGO_H / 64.0,
         })
         self.root:draw()
     end
@@ -159,18 +159,18 @@ end
 
 -- ---- Options -----------------------------------------------------------
 --
--- Sample settings wired via opt_set / opt_get + the engine's
--- music_volume binding. Used as the dogfood scene for Checkbox + Slider
+-- Sample settings wired via optSet / optGet + the engine's
+-- musicVolume binding. Used as the dogfood scene for Checkbox + Slider
 -- + Label + LineEdit.
 --
--- - "Music" checkbox toggles persisted `music_on` and mutes/restores
+-- - "Music" checkbox toggles persisted `musicOn` and mutes/restores
 --   the music volume immediately.
--- - "Master volume" slider sets persisted `music_vol` and applies it
+-- - "Master volume" slider sets persisted `musicVol` and applies it
 --   live whenever Music is on.
--- - "Player name" LineEdit persists the typed text via opt_set.
+-- - "Player name" LineEdit persists the typed text via optSet.
 --
 -- Options are saved to sdlfun.dat when the user presses BACK / Esc /
--- Backspace; on_change runs only in-memory + applies the live audio
+-- Backspace; onChange runs only in-memory + applies the live audio
 -- effect so dragging the slider doesn't thrash the disk.
 
 function M.options()
@@ -178,101 +178,101 @@ function M.options()
         transparent = true,                -- main menu renders behind us
         root        = widget.panel({ x = 0, y = 0 }),
     }
-    local vw, vh = view_size()
+    local vw, vh = viewSize()
     opt.vw, opt.vh = vw, vh
-    opt.title_y = -vh * 0.5 + PAD
+    opt.titleY = -vh * 0.5 + PAD
 
     -- Persisted defaults — sane on first run.
-    local music_on    = opt_get("music_on",    true)
-    local music_vol   = opt_get("music_vol",   0.7)
-    local player_name = opt_get("player_name", "")
+    local musicOn    = optGet("music_on",    true)
+    local musicVol   = optGet("music_vol",   0.7)
+    local playerName = optGet("player_name", "")
 
     -- Layout: settings column starts below the title, centred.
     local COL_W = 320
     local COL_X = -COL_W * 0.5
-    local row_y = opt.title_y + 60
+    local rowY = opt.titleY + 60
 
-    -- Forward reference so the checkbox's on_change can read the
+    -- Forward reference so the checkbox's onChange can read the
     -- slider's current value.
-    local music_slider
+    local musicSlider
 
-    local music_check = widget.checkbox{
-        x = COL_X, y = row_y, width = COL_W, height = BTN_H,
+    local musicCheck = widget.checkbox{
+        x = COL_X, y = rowY, width = COL_W, height = BTN_H,
         text       = "Music",
         font       = "button_font",
-        text_scale = SCALE_BUTTON,
+        textScale = SCALE_BUTTON,
         color      = BTN_FG_COLOR,
-        value      = music_on,
-        on_change = function(self, v)
-            opt_set("music_on", v)
-            music_volume(v and music_slider.value or 0.0)
+        value      = musicOn,
+        onChange = function(self, v)
+            optSet("music_on", v)
+            musicVolume(v and musicSlider.value or 0.0)
         end,
     }
-    row_y = row_y + BTN_H + BTN_GAP
+    rowY = rowY + BTN_H + BTN_GAP
 
-    local vol_label = widget.label{
-        x = COL_X, y = row_y, width = COL_W, height = 22,
+    local volLabel = widget.label{
+        x = COL_X, y = rowY, width = COL_W, height = 22,
         text       = "Master volume",
         font       = "button_font",
-        text_scale = SCALE_BUTTON,
+        textScale = SCALE_BUTTON,
         color      = BTN_FG_COLOR,
         align      = ALIGN_LEFT + ALIGN_MIDDLE,
     }
-    row_y = row_y + 22 + 4
+    rowY = rowY + 22 + 4
 
-    music_slider = widget.slider{
-        x = COL_X, y = row_y, width = COL_W, height = 18,
-        min = 0.0, max = 1.0, value = music_vol, step = 0.05,
-        on_change = function(self, v)
-            opt_set("music_vol", v)
-            if opt_get("music_on", true) then music_volume(v) end
+    musicSlider = widget.slider{
+        x = COL_X, y = rowY, width = COL_W, height = 18,
+        min = 0.0, max = 1.0, value = musicVol, step = 0.05,
+        onChange = function(self, v)
+            optSet("music_vol", v)
+            if optGet("music_on", true) then musicVolume(v) end
         end,
     }
-    row_y = row_y + 18 + BTN_GAP * 2
+    rowY = rowY + 18 + BTN_GAP * 2
 
-    local name_label = widget.label{
-        x = COL_X, y = row_y, width = COL_W, height = 22,
+    local nameLabel = widget.label{
+        x = COL_X, y = rowY, width = COL_W, height = 22,
         text       = "Player name",
         font       = "button_font",
-        text_scale = SCALE_BUTTON,
+        textScale = SCALE_BUTTON,
         color      = BTN_FG_COLOR,
         align      = ALIGN_LEFT + ALIGN_MIDDLE,
     }
-    row_y = row_y + 22 + 4
+    rowY = rowY + 22 + 4
 
-    local name_edit = widget.line_edit{
-        x = COL_X, y = row_y, width = COL_W, height = 28,
-        text       = player_name,
+    local nameEdit = widget.lineEdit{
+        x = COL_X, y = rowY, width = COL_W, height = 28,
+        text       = playerName,
         font       = "button_font",
-        text_scale = SCALE_BUTTON,
+        textScale = SCALE_BUTTON,
         color      = BTN_FG_COLOR,
-        bg_color = {
+        bgColor = {
             enabled  = { 0.10, 0.10, 0.14, 0.85 },
             disabled = { 0.05, 0.05, 0.08, 0.6 },
         },
         padding     = { l = 8, r = 8, t = 4, b = 4 },
-        max_length  = 24,
+        maxLength  = 24,
         placeholder = "Type your name",
-        on_change   = function(self, t) opt_set("player_name", t) end,
+        onChange   = function(self, t) optSet("player_name", t) end,
     }
-    row_y = row_y + 28 + BTN_GAP * 2
+    rowY = rowY + 28 + BTN_GAP * 2
 
-    local function commit_and_pop()
-        opt_save()
+    local function commitAndPop()
+        optSave()
         -- Mirror the in-slide: same edge, same duration.
         scene.pop(transition.slide("top", OPT_SLIDE_DUR))
     end
 
-    local back = make_menu_button(-BTN_W * 0.5, row_y, BTN_W, BTN_H,
-                                  "BACK", commit_and_pop)
+    local back = makeMenuButton(-BTN_W * 0.5, rowY, BTN_W, BTN_H,
+                                  "BACK", commitAndPop)
 
-    opt.root:add(music_check)
-    opt.root:add(vol_label)
-    opt.root:add(music_slider)
-    opt.root:add(name_label)
-    opt.root:add(name_edit)
+    opt.root:add(musicCheck)
+    opt.root:add(volLabel)
+    opt.root:add(musicSlider)
+    opt.root:add(nameLabel)
+    opt.root:add(nameEdit)
     opt.root:add(back)
-    -- :add auto-focused music_check (first focusable). That's the
+    -- :add auto-focused musicCheck (first focusable). That's the
     -- desired default, so no override.
 
     function opt:render()
@@ -285,10 +285,10 @@ function M.options()
         local ry = self.root.y or 0
         local d = math.max(math.abs(rx) / self.vw, math.abs(ry) / self.vh)
         if d > 1 then d = 1 end
-        local slide_progress = 1 - d
-        draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
-                  { color = { 0, 0, 0, 0.5 * slide_progress } })
-        draw_text("OPTIONS", rx, self.title_y + ry, {
+        local slideProgress = 1 - d
+        drawQuad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
+                  { color = { 0, 0, 0, 0.5 * slideProgress } })
+        drawText("OPTIONS", rx, self.titleY + ry, {
             scale = SCALE_MENU_TITLE,
             font  = "menu_title_font",
             align = ALIGN_TOP + ALIGN_CENTER,
@@ -303,13 +303,13 @@ function M.options()
         -- a character). Probe the focused leaf directly so we can tell
         -- "consumed" from "ignored".
         if name == "escape" then
-            commit_and_pop()
+            commitAndPop()
             return
         end
         if name == "backspace" then
-            local fc = self.root.focused_child
+            local fc = self.root.focusedChild
             if fc and fc.keydown and fc:keydown(name) then return end
-            commit_and_pop()
+            commitAndPop()
             return
         end
         self.root:keydown(name)
@@ -320,11 +320,11 @@ end
 
 -- ---- Confirm dialog ----------------------------------------------------
 --
--- on_ok: a function invoked when OK is chosen (called AFTER the dialog
--- pops, so app_quit() / app_new_game() / etc. queue their pendingAction
+-- onOk: a function invoked when OK is chosen (called AFTER the dialog
+-- pops, so appQuit() / appNewGame() / etc. queue their pendingAction
 -- and main.cpp picks it up the same frame).
 
-function M.confirm_dialog(title, message, on_ok)
+function M.confirmDialog(title, message, onOk)
     local dlg = {
         transparent = true,
         root        = widget.panel({ x = 0, y = 0 }),
@@ -338,35 +338,35 @@ function M.confirm_dialog(title, message, on_ok)
     local bx0    = rx + (DLG_W - total) * 0.5
     local by     = ry + DLG_H - DLG_PAD - DLG_BTN_H
     dlg.rect = { x = rx, y = ry, w = DLG_W, h = DLG_H }
-    local vw, vh = view_size()
+    local vw, vh = viewSize()
     dlg.vw, dlg.vh = vw, vh
 
     -- pop + (optional) fire pattern shared by OK / Cancel / Esc.
-    -- With a slide-out, on_ok needs to wait until after the dialog has
+    -- With a slide-out, onOk needs to wait until after the dialog has
     -- actually left the screen — firing it during the slide would let
     -- the new game / quit / etc. happen behind the still-visible
-    -- dialog. Hand the action off to dlg.on_exit_fire and let :exit
-    -- (called by scene.pop's on_action_done) fire it.
-    local function pop_and_fire(choose_ok)
-        if choose_ok and on_ok then dlg.on_exit_fire = on_ok end
+    -- dialog. Hand the action off to dlg.onExitFire and let :exit
+    -- (called by scene.pop's onActionDone) fire it.
+    local function popAndFire(chooseOk)
+        if chooseOk and onOk then dlg.onExitFire = onOk end
         scene.pop(transition.slide("bottom", DLG_SLIDE_DUR))
     end
 
     function dlg:exit()
-        if self.on_exit_fire then
-            local fn = self.on_exit_fire
-            self.on_exit_fire = nil
+        if self.onExitFire then
+            local fn = self.onExitFire
+            self.onExitFire = nil
             fn()
         end
     end
 
-    local ok = make_menu_button(bx0, by, DLG_BTN_W, DLG_BTN_H, "OK",
-                                function() pop_and_fire(true) end)
-    local cancel = make_menu_button(bx0 + DLG_BTN_W + 10, by, DLG_BTN_W, DLG_BTN_H,
-                                    "CANCEL", function() pop_and_fire(false) end)
+    local ok = makeMenuButton(bx0, by, DLG_BTN_W, DLG_BTN_H, "OK",
+                                function() popAndFire(true) end)
+    local cancel = makeMenuButton(bx0 + DLG_BTN_W + 10, by, DLG_BTN_W, DLG_BTN_H,
+                                    "CANCEL", function() popAndFire(false) end)
     -- Center buttons' text in their slightly-narrower frames.
-    ok.text_align     = ALIGN_CENTER + ALIGN_MIDDLE
-    cancel.text_align = ALIGN_CENTER + ALIGN_MIDDLE
+    ok.textAlign     = ALIGN_CENTER + ALIGN_MIDDLE
+    cancel.textAlign = ALIGN_CENTER + ALIGN_MIDDLE
 
     dlg.root:add(ok)
     dlg.root:add(cancel)
@@ -374,7 +374,7 @@ function M.confirm_dialog(title, message, on_ok)
     -- :add auto-focused OK (first focusable). Override to Cancel — the
     -- safer default for a destructive prompt.
     ok.focused                = false
-    dlg.root.focused_child    = cancel
+    dlg.root.focusedChild    = cancel
     cancel.focused            = true
 
     function dlg:render()
@@ -387,21 +387,21 @@ function M.confirm_dialog(title, message, on_ok)
         local oy = self.root.y or 0
         local d  = math.max(math.abs(ox) / self.vw, math.abs(oy) / self.vh)
         if d > 1 then d = 1 end
-        local slide_progress = 1 - d
-        draw_quad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
-                  { color = { 0, 0, 0, 0.5 * slide_progress } })
+        local slideProgress = 1 - d
+        drawQuad(-self.vw * 0.5, -self.vh * 0.5, self.vw, self.vh,
+                  { color = { 0, 0, 0, 0.5 * slideProgress } })
         local r = self.rect
         -- Panel body. dialog_bg is a 32×32 tile asset in the original C
         -- menu; for now fill flat — wire the tile later by registering
         -- it as a slice-carrying region.
-        draw_quad(r.x + ox, r.y + oy, r.w, r.h, { color = { 0.14, 0.14, 0.22, 1.0 } })
-        widget.draw_outline(r.x + ox, r.y + oy, r.w, r.h,
+        drawQuad(r.x + ox, r.y + oy, r.w, r.h, { color = { 0.14, 0.14, 0.22, 1.0 } })
+        widget.drawOutline(r.x + ox, r.y + oy, r.w, r.h,
                             2, { 0.9, 0.9, 1.0, 0.5 })
-        draw_text(self.title, r.x + r.w * 0.5 + ox, r.y + DLG_PAD + oy, {
+        drawText(self.title, r.x + r.w * 0.5 + ox, r.y + DLG_PAD + oy, {
             scale = SCALE_DIALOG_TITLE, font = "dialog_title",
             align = ALIGN_TOP + ALIGN_CENTER, color = { 1, 1, 1 },
         })
-        draw_text(self.message, r.x + r.w * 0.5 + ox, r.y + r.h * 0.5 + oy, {
+        drawText(self.message, r.x + r.w * 0.5 + ox, r.y + r.h * 0.5 + oy, {
             scale = SCALE_DIALOG_MSG, font = "button_font",
             align = ALIGN_MIDDLE + ALIGN_CENTER, color = { 1, 1, 1 },
         })
@@ -410,7 +410,7 @@ function M.confirm_dialog(title, message, on_ok)
 
     function dlg:keydown(name)
         if name == "escape" then
-            pop_and_fire(false)
+            popAndFire(false)
             return
         end
         self.root:keydown(name)

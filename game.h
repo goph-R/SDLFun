@@ -184,7 +184,7 @@ static int gameInit(Game *g,
        session — the Lua menu state outlives gameInit/gameFree cycles.
        on_start still fires here so per-session setup (welcome message,
        initial switch activations) lands on frame 0. */
-    scriptCall(script, "on_start");
+    scriptCall(script, "onStart");
 
     return 1;
 }

@@ -10,7 +10,7 @@
 -- through as raw paths so one-offs still work without registering.
 --
 -- Name convention: short, lowercase, matching what game code / scripts
--- will pass to snd_play("...") etc. File paths are relative to the repo
+-- will pass to soundPlay("...") etc. File paths are relative to the repo
 -- root (same convention as every other asset in the engine).
 
 return {
@@ -18,7 +18,7 @@ return {
         -- Single sounds: name = "path"
         fire  = "assets/sounds/fire.wav",
         jump  = "assets/sounds/jump.wav",
-        -- Random-pick groups: name = { "path1", "path2", ... }. snd_play
+        -- Random-pick groups: name = { "path1", "path2", ... }. soundPlay
         -- (or sndLibPick from C) picks a uniformly-random non-repeating
         -- variant each call. Up to SND_MAX_VARIANTS (4) per group.
         steps = {
@@ -28,11 +28,11 @@ return {
         },
     },
 
-    -- Streaming Ogg Vorbis tracks for music_play(name [, fade [, loop]]).
+    -- Streaming Ogg Vorbis tracks for musicPlay(name [, fade [, loop]]).
     -- Unlike `sounds`, music isn't preloaded — files are opened lazily on
-    -- the first music_play. "title" is auto-played by the menu on boot;
+    -- the first musicPlay. "title" is auto-played by the menu on boot;
     -- name additional tracks (ambient, combat, etc.) and trigger them
-    -- from on_start or scripted events. Drop .ogg files in assets/music/.
+    -- from onStart or scripted events. Drop .ogg files in assets/music/.
     music = {
         title   = "assets/music/title.ogg",
         ambient = "assets/music/ambient_loop.ogg",
@@ -90,7 +90,7 @@ return {
     },
 
     -- Regions are sub-rectangles of textures, addressed by name from
-    -- draw_region / draw_bg. Full-texture regions are (0, 0, full_w,
+    -- drawRegion / drawBg. Full-texture regions are (0, 0, full_w,
     -- full_h). The Lua menu (scripts/menu.lua) draws these by name.
     regions = {
         menu_bg    = { tex = "menu_bg",    x = 0, y = 0, w = 256, h = 128 },

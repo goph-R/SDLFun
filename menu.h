@@ -133,7 +133,7 @@ static void drawLoadingScreen(AppState *app)
     float vw = uiGetWidth(ui);
     float vh = uiGetHeight(ui);
     UiRect full = uiRectMake(-vw * 0.5f, -vh * 0.5f, vw, vh);
-    GLuint tex = appGetMenuTex(app, "loading_bg", GL_CLAMP_TO_EDGE);
+    GLuint tex = appGetMenuTex(app, "loadingBg", GL_CLAMP_TO_EDGE);
     if (tex) {
         float srcAspect = 2.0f / 1.0f;
         float dstAspect = vw / vh;
@@ -168,7 +168,7 @@ static void drawLoadingScreen(AppState *app)
        targeted ~40 vpx; in the new convention that's 40/28. */
     uiText(ui, halfW - 30.0f, halfH - 30.0f,
            fg, "LOADING", 40.0f / 28.0f,
-           UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "button_font");
+           UI_ALIGN_BOTTOM | UI_ALIGN_RIGHT, "buttonFont");
     uiEnd(ui);
 
     SDL_GL_SwapBuffers();
