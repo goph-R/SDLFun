@@ -82,9 +82,11 @@ Case depends on *where the name sits*, not what it means:
 - **UPPER_SNAKE_CASE** — constants; **CamelCase** — classes.
 
 So one logical name may appear in two casings by role, e.g.
-`local musicOn = optGet("music_on")`. Compound event names are fully humped
-(`onMouseDown`, `onKeyDown`, scene `:mouseDown(x, y, b)`), kept in lockstep
-with the C hook strings. Model IDs are referenced by string from `.ent` level
+`local musicOn = optGet("music_on")`. Event hooks are `on` + CamelCase event,
+single- or multi-word alike (`onUpdate`, `onRender`, `onMouseDown`,
+`onKeyDown`, `onTextInput`); scene methods drop the `on` (`:update(dt)`,
+`:mouseDown(x, y, b)`, `:keyDown(name)`), kept in lockstep with the C hook
+strings. Model IDs are referenced by string from `.ent` level
 files (`mesh=office_desk`) and must match the snake_case `assets.lua` key.
 C bindings expose a camelCase name (`lua_register(L, "drawText", scrDrawText)`)
 while the C wrapper is named `scrCamelCase` — rename both sides together.
