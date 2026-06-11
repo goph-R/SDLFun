@@ -120,8 +120,11 @@ function M.mainMenu()
             end))
 
         -- Title music starts on first menu entry; later re-enters
-        -- crossfade smoothly.
-        musicPlay("title", 1.0, true)
+        -- crossfade smoothly. Honor the persisted music_on toggle so a
+        -- player who disabled music in a prior session boots silent.
+        if optGet("music_on", true) then
+            musicPlay("title", 1.0, true)
+        end
     end
 
     -- CONTINUE's enabled flag tracks appHasGame() — that becomes true

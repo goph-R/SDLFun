@@ -27,5 +27,7 @@ scene.push(menu.mainMenu())
 function onStart()
     uiShowMessage("Welcome to SDLFun", 3)
     soundPlay("jump")
-    musicPlay("ambient")          -- crossfades over the menu's title track
+    if optGet("music_on", true) then
+        musicPlay("ambient")      -- crossfades over the menu's title track
+    end
 end
