@@ -9,6 +9,7 @@
 local scene      = require "engine.scene"
 local widget     = require "engine.widget"
 local transition = require "engine.transition"
+local audio      = require "audio"
 
 -- Tunables for dialog/options slide-in. Same duration across all so
 -- the menu's modal layer has a consistent rhythm.
@@ -120,11 +121,10 @@ function M.mainMenu()
             end))
 
         -- Title music starts on first menu entry; later re-enters
-        -- crossfade smoothly. Honor the persisted music_on toggle so a
-        -- player who disabled music in a prior session boots silent.
-        if optGet("music_on", true) then
-            musicPlay("title", 1.0, true)
-        end
+        -- crossfade smoothly. audio.play stays silent while music_on
+        -- is false but remembers the request so toggling Music on later
+        -- resumes "title".
+        audio.play("title", 1.0, true)
     end
 
     -- CONTINUE's enabled flag tracks appHasGame() — that becomes true
@@ -195,8 +195,6 @@ function M.options()
     local COL_X = -COL_W * 0.5
     local rowY = opt.titleY + 60
 
-    -- Forward reference so the checkbox's onChange can read the
-    -- slider's current value.
     local musicSlider
 
     local musicCheck = widget.checkbox{
@@ -206,10 +204,7 @@ function M.options()
         textScale = SCALE_BUTTON,
         color      = BTN_FG_COLOR,
         value      = musicOn,
-        onChange = function(self, v)
-            optSet("music_on", v)
-            musicVolume(v and musicSlider.value or 0.0)
-        end,
+        onChange = function(self, v) audio.setEnabled(v) end,
     }
     rowY = rowY + BTN_H + BTN_GAP
 
@@ -226,10 +221,7 @@ function M.options()
     musicSlider = widget.slider{
         x = COL_X, y = rowY, width = COL_W, height = 18,
         min = 0.0, max = 1.0, value = musicVol, step = 0.05,
-        onChange = function(self, v)
-            optSet("music_vol", v)
-            if optGet("music_on", true) then musicVolume(v) end
-        end,
+        onChange = function(self, v) audio.setVolume(v) end,
     }
     rowY = rowY + 18 + BTN_GAP * 2
 
