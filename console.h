@@ -233,9 +233,16 @@ static void conRender(Console *c, UiState *ui, GLuint bgTex)
                       panel.w, CON_DIVIDER_PX),
            divider);
 
+    /* Line spacing follows the same convention as uiText: rendered text
+       height = scale * font.lineHeight. Look up the default font (NULL ->
+       "default") so spacing matches whatever uiText actually drew. Falls
+       back to the 8x8 bitmap's native height when no BMFont is loaded. */
+    UiFont *refFont = uiFontFind(&ui->fonts, NULL);
+    float refLh = refFont ? (float)refFont->lineHeight : 8.0f;
+
     /* Prompt strip lives one line height above the divider. */
-    float promptLineH = CON_PROMPT_SCALE * 8.0f;
-    float logLineH    = CON_LINE_SCALE   * 8.0f;
+    float promptLineH = CON_PROMPT_SCALE * refLh;
+    float logLineH    = CON_LINE_SCALE   * refLh;
     float promptY     = panel.y + panel.h - CON_DIVIDER_PX - promptLineH;
     float logTopBound = panel.y + 3.0f;  /* don't draw lines above this */
 
