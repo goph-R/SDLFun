@@ -170,6 +170,10 @@ static void saveDesktopRefreshHz(void) {}
 static void applyFullscreenRefreshHz(int, int) {}
 #endif
 
+/* DPI awareness — included after <windows.h> so its careful late ordering is
+   preserved; self-guarded and a no-op on non-Win32. */
+#include "dpi.h"
+
 /* ---- OpenGL helpers ---- */
 
 static void glSetPerspective(float fovDeg, float aspect, float zNear, float zFar)
@@ -779,6 +783,12 @@ static void updateDoors(EntityList *el, PhysWorld *pw, float dt)
 
 int main(int argc, char *argv[])
 {
+    /* Tell modern Windows we render in real pixels, before SDL touches the
+       display — otherwise a non-100% display scale makes SDL_GetVideoInfo
+       report a virtualised desktop and fullscreen oversizes. Safe no-op on
+       old Windows (and Linux): see dpi.h. */
+    dpiSetProcessAware();
+
     /* Display config: built-in defaults → config.lua → CLI args → clamp.
        Width/height of 0 is a sentinel for "use desktop resolution",
        resolved below once SDL knows the desktop size. */
