@@ -861,6 +861,11 @@ int main(int argc, char *argv[])
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    /* Request vsync before SDL_SetVideoMode (SDL 1.2.10+). Only a request:
+       some old drivers ignore it and there's no read-back in 1.2, so we just
+       log what we asked for. */
+    SDL_GL_SetAttribute(SDL_GL_SWAP_CONTROL, cfg.vsync);
+    conLogf("VSync: %s\n", cfg.vsync ? "on (requested)" : "off");
 
     Uint32 videoFlags = SDL_OPENGL;
     if (fullscreen) videoFlags |= SDL_FULLSCREEN;
