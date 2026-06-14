@@ -37,6 +37,8 @@ In-game controls: WASD move, mouse look, Space jump, F flashlight, Left-click fi
 
 Windows-specific: SDL 1.2's fullscreen path drops the monitor's refresh rate to 60Hz because it calls `ChangeDisplaySettings` without a frequency. `main.cpp` samples the configured desktop rate via `EnumDisplaySettings(ENUM_REGISTRY_SETTINGS)` before `SDL_Init` and re-applies it with `ChangeDisplaySettingsEx` after `SDL_SetVideoMode` when `-fullscreen` is passed. No-op on Linux (the helpers are `#ifdef _WIN32`). If the chosen resolution doesn't support the saved rate, the override is skipped with a log line and the driver's default stays in effect.
 
+DPI awareness: a DPI-unaware process is lied to on Windows 8.1+ when the display scale isn't 100% — `SDL_GetVideoInfo` reports a *virtualised* desktop (1920×1080 @125% comes back as 1536×864) and the compositor stretches the output, so explicit fullscreen resolutions oversize/blur. `main.cpp` calls `dpiSetProcessAware()` (from SOOB-Core's `dpi.h`) first thing in `main()`, before `SDL_Init`, so the OS reports real pixels and the `0 = desktop` sentinel plus explicit sizes both land 1:1. The helper resolves `SetProcessDpiAwarenessContext` / `SetProcessDpiAwareness` / `SetProcessDPIAware` at runtime via `GetProcAddress` (newest→oldest), so Win98/2000/XP fall through to a no-op and the exe still loads. No-op on Linux. Must run before any window is created — DPI awareness can't be changed once locked in.
+
 ## Architecture
 
 ### Header-only modules included from main.cpp
