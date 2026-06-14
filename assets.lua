@@ -34,8 +34,8 @@ return {
     -- name additional tracks (ambient, combat, etc.) and trigger them
     -- from onStart or scripted events. Drop .ogg files in assets/music/.
     music = {
-        title   = "assets/music/title.ogg",
-        ambient = "assets/music/ambient_loop.ogg",
+        title    = "assets/music/title.ogg",
+        arriving = "assets/music/arriving.ogg",
         -- combat  = "assets/music/combat_loop.ogg",
     },
 
