@@ -53,11 +53,25 @@ if exist %OBJDIR%\bd.o (
 )
 
 REM ----------------------------------------------------------------
+REM  Lua 5.1.5 (unity build) — edit_assets.h runs assets.lua in a bare
+REM  Lua state to register models/textures. Same object the game build
+REM  produces; delete raw\obj\lua.o to force a rebuild.
+REM ----------------------------------------------------------------
+if exist %OBJDIR%\lua.o (
+    echo Skipping Lua ^(lua.o cached^)
+) else (
+    echo Compiling Lua...
+    C:\Dev-Cpp\bin\gcc.exe -I%ENGINE%\vendor\lua-5.1.5\src -Dluaall_c -DLUA_ANSI -O2 -c %ENGINE%\vendor\lua-5.1.5\src\lua_all.c -o %OBJDIR%\lua.o
+    if errorlevel 1 goto error
+)
+
+REM ----------------------------------------------------------------
 REM  Compile the editor. -I%ENGINE% resolves SOOB-Core headers
-REM  (texture.h, asset_registry.h); -I%FLTK% resolves <FL/...>.
+REM  (texture.h, asset_registry.h); -I%FLTK% resolves <FL/...>;
+REM  the lua src path resolves edit_assets.h's <lua.h>.
 REM ----------------------------------------------------------------
 echo Compiling editor...
-C:\Dev-Cpp\bin\g++.exe -DWIN32 -DWINVER=0x0500 -D_WIN32_WINNT=0x0500 -I%ENGINE% -I%FLTK% -Ivendor\bullet3-3.25\src -O2 -c editor.cpp -o %OBJDIR%\editor.o
+C:\Dev-Cpp\bin\g++.exe -DWIN32 -DWINVER=0x0500 -D_WIN32_WINNT=0x0500 -I%ENGINE% -I%FLTK% -Ivendor\bullet3-3.25\src -I%ENGINE%\vendor\lua-5.1.5\src -O2 -c editor.cpp -o %OBJDIR%\editor.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------
@@ -65,7 +79,7 @@ REM  Link: FLTK (GL + core) + Bullet + Win32 GL/GDI. No -mwindows so
 REM  the conLogf stdout stays visible while bringing the editor up.
 REM ----------------------------------------------------------------
 echo Linking...
-C:\Dev-Cpp\bin\g++.exe %OBJDIR%\editor.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o -o SoobEditor.exe -L%FLTK%\lib -lfltk_gl -lfltk -lopengl32 -lglu32 -lole32 -luuid -lcomctl32 -lcomdlg32 -lgdi32 -lwsock32
+C:\Dev-Cpp\bin\g++.exe %OBJDIR%\editor.o %OBJDIR%\bl.o %OBJDIR%\bc.o %OBJDIR%\bd.o %OBJDIR%\lua.o -o SoobEditor.exe -L%FLTK%\lib -lfltk_gl -lfltk -lopengl32 -lglu32 -lole32 -luuid -lcomctl32 -lcomdlg32 -lgdi32 -lwsock32
 if errorlevel 1 goto error
 
 echo.

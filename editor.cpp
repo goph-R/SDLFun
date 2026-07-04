@@ -16,11 +16,11 @@
  * On top of that it draws an editor-only overlay (ground grid + origin axis
  * gizmo) — the seed for gizmos / selection / entity handles later.
  *
- * This is a SKELETON: it boots an EMPTY AssetRegistry, so the lit level mesh
- * (its own diffuse + baked lightmap) renders fully, but entity *meshes* won't
- * resolve until the asset pipeline (scriptLoadAssets from assets.lua) is
- * wired in — the clear next step. Entity transforms still parse, so entity
- * markers could be drawn from the overlay meanwhile.
+ * The lit level mesh (its own diffuse + baked lightmap) renders through the
+ * engine path, and entity meshes resolve too: editLoadAssets (edit_assets.h)
+ * runs assets.lua in a bare Lua state and registers its models + textures into
+ * the AssetRegistry, so entLoadFile can map mesh=/iqm=/tex= names to files.
+ * No UI/audio/script runtime is pulled in — just Lua.
  *
  * Run from the repo root (assets are relative-pathed, exactly like the game):
  *     ./soob_editor [level.obj] [level.ent]
@@ -35,6 +35,9 @@
 
 #include <FL/Fl.H>
 #include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Window.H>
+#include <FL/Fl_Group.H>
+#include <FL/Fl_Button.H>
 #include <FL/gl.h>
 
 #include <cstdio>
@@ -70,6 +73,7 @@ static void conLogf(const char *fmt, ...)
 #include "render_level.h"
 #include "render_world.h"
 #include "edit_load.h"
+#include "edit_assets.h"     /* minimal assets.lua -> AssetRegistry (models+textures) */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -97,8 +101,8 @@ public:
     float yaw, pitch;
     int   lastX, lastY;
 
-    EditorView(int W, int H, const char *L)
-        : Fl_Gl_Window(W, H, L),
+    EditorView(int X, int Y, int W, int H)
+        : Fl_Gl_Window(X, Y, W, H),
           objPath("assets/levels/test_level.obj"),
           entPath("assets/levels/test_level.ent"),
           loaded(0), bootstrapped(0),
@@ -147,7 +151,8 @@ public:
            constructor. */
         if (!bootstrapped) {
             initGL();
-            assetRegInit(&assetReg);     /* empty registry — skeleton */
+            assetRegInit(&assetReg);
+            editLoadAssets(&assetReg, "assets.lua");  /* resolve entity mesh/tex names */
             loaded = editLoadLevel(&scene, objPath, entPath, &assetReg);
             if (!loaded)
                 conLogf("editor: failed to load %s / %s\n", objPath, entPath);
@@ -294,20 +299,56 @@ static void frameTimer(void *v)
     Fl::repeat_timeout(1.0 / 60.0, frameTimer, v);
 }
 
+/* Placeholder toolbar actions — just log which button was pressed for now.
+   These are stubs to hang real editor commands off of later. */
+static void toolbarCb(Fl_Widget *w, void *)
+{
+    conLogf("[toolbar] %s\n", w->label());
+}
+
 int main(int argc, char **argv)
 {
     Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
 
-    EditorView *view = new EditorView(1024, 768, "SOOB Level Editor");
+    const int W = 1024, H = 768;
+    const int TB = 30;                 /* toolbar height */
+
+    Fl_Window *win = new Fl_Window(W, H, "SOOB Level Editor");
+    win->begin();
+
+    /* Toolbar strip across the top. Fixed height; the buttons are fake for
+       now (they only log). A gap after "Save" and after "Scale" groups them
+       into file / transform / playback clusters. */
+    Fl_Group *toolbar = new Fl_Group(0, 0, W, TB);
+    toolbar->box(FL_UP_BOX);
+    {
+        static const char *labels[] = {
+            "New", "Open", "Save", "Select", "Move", "Rotate", "Scale", "Play"
+        };
+        const int n = (int)(sizeof(labels) / sizeof(labels[0]));
+        int x = 4;
+        for (int i = 0; i < n; i++) {
+            if (i == 3 || i == 7) x += 8;          /* cluster gaps */
+            Fl_Button *b = new Fl_Button(x, 3, 54, TB - 6, labels[i]);
+            b->callback(toolbarCb);
+            x += 54 + 2;
+        }
+    }
+    toolbar->end();
+    toolbar->resizable(NULL);          /* buttons stay put when the window resizes */
+
+    /* GL viewport fills everything below the toolbar. */
+    EditorView *view = new EditorView(0, TB, W, H - TB);
     if (argc > 1) view->objPath = argv[1];
     if (argc > 2) view->entPath = argv[2];
-    view->resizable(view);
-    view->end();
+
+    win->end();
+    win->resizable(view);              /* only the viewport grows/shrinks */
 
     conLogf("SOOB Level Editor — left-drag look, WASD move, Q/E down/up, wheel dolly\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
-    view->show(argc, argv);
+    win->show(argc, argv);
     view->take_focus();
     Fl::add_timeout(1.0 / 60.0, frameTimer, view);
 

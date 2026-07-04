@@ -109,11 +109,12 @@ and `-D*_FLAGS="-DWINVER=0x0500 -D_WIN32_WINNT=0x0500"`.)
 Run `build_editor.bat` from the engine root. Its `FLTK` variable already points
 at `vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced
 the libs yet. It compiles `editor.cpp` with `-DWIN32 -I%FLTK%` and links
-`-lfltk_gl -lfltk` plus Bullet + Win32 GL/GDI. No SDL, OpenAL, Lua, or vorbis —
-the `game.h` / `game_session.h` split keeps the script/UI/audio runtime out of
-the editor TU, so its only libraries are FLTK, Bullet, and `opengl32`.
-(`-mwindows` is intentionally omitted so the editor's `conLogf` stdout stays
-visible while bringing it up.)
+`-lfltk_gl -lfltk` plus Bullet, Lua, and Win32 GL/GDI. No SDL, OpenAL, or
+vorbis — the `game.h` / `game_session.h` split keeps the script/UI/audio
+runtime out of the editor TU. Lua alone is linked, only so `edit_assets.h` can
+run `assets.lua` in a bare Lua state and register the `models`/`textures` the
+entities reference (mesh=/iqm=/tex=). (`-mwindows` is intentionally omitted so
+the editor's `conLogf` stdout stays visible while bringing it up.)
 
 Run `SoobEditor.exe` from the repo root — assets are relative-pathed, exactly
 like the game.
