@@ -2,8 +2,15 @@
 *.o
 *.exe
 sdlfun
+soob_editor
 build/
 raw/obj/
+
+# FLTK static libs built by build_fltk.bat. The FLTK source and the four
+# engine-provided support files (config.h, FL/abi-version.h, fltk_core.list,
+# fltk_gl.list) stay tracked; only the built .a output is ignored.
+# (FLTK object files land in raw/obj/fltk/, already covered by raw/obj/.)
+vendor/fltk-1.3/FL/lib/
 
 # Engine Lua modules copied from ../SOOB-Core/ at build time.
 # Source of truth lives in SOOB-Core; this dir is regenerated on each build.
@@ -12,6 +19,7 @@ scripts/engine/
 # Temp/log files
 output.txt
 stdout.txt
+build_fltk_output.txt
 
 # Downloaded installers
 ms3d184setup.exe

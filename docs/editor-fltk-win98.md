@@ -1,0 +1,127 @@
+# Building FLTK for the SOOB Level Editor on Windows 98
+
+The SOOB level editor (`editor.cpp`, built by `build_editor.bat`) uses **FLTK**
+for its window + GL viewport. FLTK does not ship a Win98 binary, so you build it
+yourself, once, with the same Dev-C++ MinGW 3.4 toolchain the engine uses. This
+doc is that recipe.
+
+## Which version
+
+| Use | Avoid |
+|---|---|
+| **FLTK 1.3.11** (latest 1.3.x) | **FLTK 1.4+** — requires C++11, which Dev-C++ GCC 3.4 can't do |
+
+FLTK 1.3.x is C++98/03 and builds with old MinGW. FLTK's *official* platform
+floor is Windows 2000+ (since 1.3.0), so Win98 is "not officially supported but
+works" — the codebase is right, but Win98 is enabled by build-time config, not
+by default. If 1.3.11 errors on GCC 3.4, drop to an earlier 1.3.x (the 1.3.3–
+1.3.4 era has the most "built with ancient MinGW" reports). Nothing in
+`editor.cpp` uses recent FLTK API, so an older 1.3.x is a drop-in.
+
+## The three things that make it work on Win98
+
+1. **Build at `-DWINVER=0x0500 -D_WIN32_WINNT=0x0500`.** This is counter-intuitive
+   — you'd expect the Win9x level (`0x0400`) — but FLTK 1.3.11's `Fl_win32.cxx`
+   references a handful of Win2000+ symbols *at compile time* (`XBUTTON1` /
+   `GET_XBUTTON_WPARAM` for extra mouse buttons; `BITMAPV5HEADER` in
+   `image_to_icon` for alpha window-icons and RGB cursors), so `0x0400` won't
+   compile. Building at `0x0500` only makes those symbols *declared* — the win32
+   backend has **no version-gated `#if` blocks**, so no new runtime code is
+   enabled, and both sites are **dead code at runtime for the editor** (Win98
+   never sends `WM_XBUTTON*`, and the editor sets no `Fl_RGB_Image` icon or
+   custom cursor). The underlying functions (`CreateDIBSection`, `TrackMouseEvent`,
+   `LoadIcon`, …) all exist on Win98, so nothing becomes an unresolvable import —
+   the binary still loads and runs on Win98. (`BITMAPV5HEADER` is gated on
+   `WINVER`, not `_WIN32_WINNT`, which is why *both* must be raised.)
+2. **Same toolchain, static libs** — build FLTK with the *same* Dev-C++ MinGW
+   3.4 used for the engine, producing static `libfltk.a` / `libfltk_gl.a` (ABI +
+   CRT match, no DLL surprises). `build_editor.bat` links these statically.
+3. **Core libs only — skip `fluid` and the test/example programs.** Those pull
+   in Win2000+ calls (e.g. `GetFileSizeEx` in fluid's code editor). The FLTK
+   *library* core is fine on Win98; the editor never needs fluid.
+
+## Vendored FLTK patch (SDK back-fill shim)
+
+Raising the API level to `0x0500` isn't enough on Dev-C++'s MinGW 3.4: its
+bundled w32api is old enough that a few Win2000-era GDI declarations simply
+**aren't in the headers at any `WINVER`**. So `build_fltk.bat` builds at
+`0x0500` *and* the vendored FLTK carries a small compat shim:
+
+- **`vendor/fltk-1.3/FL/src/fl_win98_compat.h`** (new file) — guarded
+  definitions for the symbols the old SDK lacks:
+  `XBUTTON1` / `XBUTTON2` / `GET_XBUTTON_WPARAM` (extra mouse buttons),
+  `BITMAPV5HEADER` (alpha icons/cursors), and `GGI_MARK_NONEXISTING_GLYPHS` /
+  `GGO_GLYPH_INDEX` (the `GetGlyphIndicesW` text path). The `#ifndef` guards
+  make it a no-op on a newer SDK.
+- Two one-line `#include "fl_win98_compat.h"` additions:
+  `src/Fl_win32.cxx` and `src/fl_font_win32.cxx` (each already has `windows.h`
+  in scope via its dispatcher, so the base types the shim needs exist).
+
+Every shimmed symbol is **dead code at runtime on Win98** — the paths that use
+them (`WM_XBUTTON*`, `image_to_icon`, `GetGlyphIndicesW`) never execute there,
+and the functions actually called all exist on Win98 — so the binary still
+loads and runs. FLTK already handles `WM_MOUSEHWHEEL` and `DwmGetWindowAttribute`
+itself (local `#define` / `GetProcAddress`), so those needed nothing.
+
+**These three files are part of the editor's build and must survive if you
+re-extract FLTK.** They live inside `vendor/fltk-1.3/` and are tracked (only
+the built `lib/*.a` and `raw/obj/fltk/` objects are gitignored).
+
+## Not a blocker on Win98
+
+You'll see `InterlockedExchangeAdd` cited as a Win9x failure in FLTK threads —
+that's a **Windows 95** problem. Windows 98/98SE has that symbol (it arrived
+with 98 / NT4), so those Win95 reports don't apply to you.
+
+## Build steps (no configure / CMake / MSYS needed)
+
+The editor ships a `build_fltk.bat` that compiles FLTK's static libs directly
+with the Dev-C++ toolchain — the same batch style as `build.bat`. It does the
+Win98-specific setup for you (the three points above), so you don't run FLTK's
+own build system at all.
+
+1. **Put the FLTK 1.3.11 source at `vendor/fltk-1.3/FL/`** — i.e. the FLTK root
+   (the dir with `src/`, `FL/`, `configure`) lives at `vendor/fltk-1.3/FL/`, so
+   headers are `vendor/fltk-1.3/FL/FL/*.H` and sources `vendor/fltk-1.3/FL/src/`.
+   Two support files are committed alongside it and must be present:
+   - `vendor/fltk-1.3/FL/config.h` — hand-authored (from `ide/VisualC6/config.h`,
+     image libs off). Normally generated by configure; supplied so we skip it.
+   - `vendor/fltk-1.3/FL/FL/abi-version.h` — also normally generated; contains
+     `#undef FL_ABI_VERSION` so `Enumerations.H` uses the default stable ABI.
+   - `vendor/fltk-1.3/fltk_core.list` / `fltk_gl.list` — the exact source lists,
+     extracted from FLTK's own Makefile (only the cross-platform dispatcher
+     `.cxx`; the `_win32` backends are `#include`d by them, not compiled alone).
+
+2. **Run `build_fltk.bat`** from the engine root. It compiles the two lists with
+   `-DWIN32 -D_WIN32_WINNT=0x0400 -DFL_LIBRARY` and archives
+   `vendor/fltk-1.3/FL/lib/libfltk.a` + `libfltk_gl.a`. It skips `fluid` and the
+   test/example programs entirely (they need Win2000+ APIs; the library core
+   doesn't). Delete `raw/obj/fltk` to force a rebuild.
+
+If a single file breaks on GCC 3.4, note which one — late 1.3.x patches
+occasionally need a small tweak on the old compiler. (The alternative route,
+if you'd rather: install CMake + `mingw32-make` and configure with
+`-DFLTK_BUILD_FLUID=OFF -DFLTK_BUILD_TEST=OFF -DOPTION_BUILD_SHARED_LIBS=OFF`
+and `-D*_FLAGS="-DWINVER=0x0500 -D_WIN32_WINNT=0x0500"`.)
+
+## Then build the editor
+
+Run `build_editor.bat` from the engine root. Its `FLTK` variable already points
+at `vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced
+the libs yet. It compiles `editor.cpp` with `-DWIN32 -I%FLTK%` and links
+`-lfltk_gl -lfltk` plus Bullet + Win32 GL/GDI. No SDL, OpenAL, Lua, or vorbis —
+the `game.h` / `game_session.h` split keeps the script/UI/audio runtime out of
+the editor TU, so its only libraries are FLTK, Bullet, and `opengl32`.
+(`-mwindows` is intentionally omitted so the editor's `conLogf` stdout stays
+visible while bringing it up.)
+
+Run `SoobEditor.exe` from the repo root — assets are relative-pathed, exactly
+like the game.
+
+## Related
+
+- `editor.cpp` — the editor skeleton (free-fly camera, grid + axis overlay).
+- `render_level.h` / `render_world.h` / `edit_load.h` — the shared engine render
+  path the editor draws through (identical to what the game ships).
+- `game_session.h` — where `gameInit`/`gameFree` moved so `game.h` (the struct)
+  can be included without the script/UI/audio runtime.
