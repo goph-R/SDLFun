@@ -45,6 +45,9 @@
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Menu_Bar.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Input.H>
+#include <FL/Fl_Value_Input.H>
 #include <FL/Fl_Pixmap.H>
 #include <FL/fl_ask.H>
 #include <FL/gl.h>
@@ -133,6 +136,11 @@ public:
     Fl_Menu_Bar  *menuBar;      /* Edit menu, for greying out Undo/Redo */
     int           undoIdx, redoIdx;
 
+    /* M5 property-panel widgets (material + tiling of the selected faces). */
+    Fl_Choice      *matChoice;
+    Fl_Input       *diffuseInput;
+    Fl_Value_Input *scaleInput, *offXInput, *offYInput;
+
     /* M2 grab (modal move): active while `grabbing`. The affected verts and
        their pre-grab positions are captured at start; the mouse delta
        (optionally axis-locked) moves them, snapped to 1 cm. */
@@ -155,6 +163,7 @@ public:
           loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
           bVert(0), bEdge(0), bFace(0),
           menuBar(0), undoIdx(-1), redoIdx(-1),
+          matChoice(0), diffuseInput(0), scaleInput(0), offXInput(0), offYInput(0),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
@@ -227,6 +236,8 @@ public:
             editMeshBuild(&emesh, &eobj);
             editSelInit(&sel, &emesh);   /* M1: selection + derived edge list */
             haveEmesh = (loaded != 0);   /* renderer needs scene.texCache valid */
+            rebuildMatChoice();          /* M5: fill the material dropdown */
+            refreshPanel();
             conLogf("editor: demo cube built (%d tris, %d sectors, %d edges)\n",
                     eobj.numTris, eobj.numSectors, sel.numEdges);
 
@@ -465,6 +476,7 @@ public:
             if (!additive) editSelClearActive(&sel);
             if (idx >= 0) sel.faceSel[idx] = additive ? !sel.faceSel[idx] : 1;
         }
+        refreshPanel();
         redraw();
     }
 
@@ -615,6 +627,7 @@ public:
             editSelInit(&sel, &emesh);
             applyMode(prev);
         }
+        refreshPanel();
         redraw();
     }
 
@@ -654,6 +667,7 @@ public:
         editSelInit(&sel, &emesh);
         applyMode(prev);
         updateMenuEnabled();
+        refreshPanel();
         redraw();
     }
 
@@ -826,8 +840,105 @@ public:
         } else {
             grabFromExtrude = 0;
         }
+        refreshPanel();
         redraw();
         conLogf("extrude: %d face(s)\n", nsel);
+    }
+
+    /* ---- M5: material / tiling property panel --------------------------- */
+
+    /* The material the panel edits: the Fl_Choice item index == material index
+       (they're listed in order). */
+    int panelMatId()
+    {
+        if (!matChoice) return -1;
+        int v = matChoice->value();
+        return (v >= 0 && v < emesh.numMats) ? v : -1;
+    }
+
+    void rebuildMatChoice()
+    {
+        if (!matChoice) return;
+        int keep = matChoice->value();
+        matChoice->clear();
+        for (int i = 0; i < emesh.numMats; i++) {
+            char nm[64];                         /* '/' and '&' are special in menus */
+            const char *s = emesh.mats[i].name;
+            int j = 0;
+            for (; s[j] && j < 63; j++)
+                nm[j] = (s[j] == '/' || s[j] == '&' || s[j] == '\\') ? '_' : s[j];
+            nm[j] = 0;
+            if (nm[0] == 0) { nm[0] = 'm'; nm[1] = 0; }
+            matChoice->add(nm);
+        }
+        if (keep >= 0 && keep < emesh.numMats) matChoice->value(keep);
+        else if (emesh.numMats > 0)            matChoice->value(0);
+    }
+
+    /* Show the selected faces' material (or the current choice) in the widgets. */
+    void refreshPanel()
+    {
+        if (!matChoice) return;
+        int id = -1, i;
+        for (i = 0; i < emesh.numFaces; i++)
+            if (sel.faceSel[i]) { id = emesh.faces[i].materialId; break; }
+        if (id < 0 || id >= emesh.numMats) id = panelMatId();
+        if (id < 0 && emesh.numMats > 0) id = 0;
+        if (id < 0) return;
+        matChoice->value(id);
+        scaleInput->value(emesh.mats[id].tilingScale);
+        offXInput->value(emesh.mats[id].tilingOffsetX);
+        offYInput->value(emesh.mats[id].tilingOffsetY);
+        diffuseInput->value(emesh.mats[id].diffusePath);
+    }
+
+    /* Live-edit the current material's tiling (shared by every face using it). */
+    void onTilingChanged()
+    {
+        int id = panelMatId();
+        if (id < 0) return;
+        float s = (float)scaleInput->value();
+        emesh.mats[id].tilingScale   = (s > 0.001f) ? s : 1.0f;
+        emesh.mats[id].tilingOffsetX = (float)offXInput->value();
+        emesh.mats[id].tilingOffsetY = (float)offYInput->value();
+        editMeshBuild(&emesh, &eobj);
+        redraw();
+    }
+
+    void onDiffuseChanged()
+    {
+        int id = panelMatId();
+        if (id < 0) return;
+        strncpy(emesh.mats[id].diffusePath, diffuseInput->value(), 127);
+        emesh.mats[id].diffusePath[127] = 0;
+        editMeshBuild(&emesh, &eobj);            /* renderer reloads by path */
+        redraw();
+    }
+
+    /* Assign the chosen material to the selected faces. */
+    void onMaterialChosen()
+    {
+        int id = matChoice->value();
+        if (id < 0 || id >= emesh.numMats) return;
+        for (int i = 0; i < emesh.numFaces; i++)
+            if (sel.faceSel[i]) emesh.faces[i].materialId = id;
+        editMeshBuild(&emesh, &eobj);
+        refreshPanel();
+        redraw();
+    }
+
+    void onAddMaterial()
+    {
+        if (emesh.numMats >= OBJ_MAX_MATERIALS) { conLogf("materials full\n"); return; }
+        int id = emesh.numMats++;
+        int base = panelMatId();
+        if (base >= 0) emesh.mats[id] = emesh.mats[base];   /* clone current */
+        else { memset(&emesh.mats[id], 0, sizeof(Material)); emesh.mats[id].tilingScale = 1.0f; }
+        snprintf(emesh.mats[id].name, 64, "material_%d", id);
+        rebuildMatChoice();
+        matChoice->value(id);
+        onMaterialChosen();                      /* assign to selection + refresh */
+        conLogf("added material_%d\n", id);
     }
 
     int handle(int e)
@@ -971,6 +1082,12 @@ static void menuMakeFaceCb(Fl_Widget *, void *v) { ((EditorView *)v)->makeFace()
 static void menuFlipCb    (Fl_Widget *, void *v) { ((EditorView *)v)->flipSelected(); }
 static void menuDeleteCb  (Fl_Widget *, void *v) { ((EditorView *)v)->deleteSelected(); }
 
+/* Property-panel callbacks. */
+static void matChoiceCb(Fl_Widget *, void *v) { ((EditorView *)v)->onMaterialChosen(); }
+static void addMatCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onAddMaterial(); }
+static void diffuseCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onDiffuseChanged(); }
+static void tilingCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onTilingChanged(); }
+
 int main(int argc, char **argv)
 {
     Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
@@ -1004,13 +1121,25 @@ int main(int argc, char **argv)
     toolbar->end();
     toolbar->resizable(NULL);          /* buttons stay put when the window resizes */
 
-    /* Right-side property panel — placeholder for now (future per-element
-       material / tiling / transform editing). Fixed width, anchored right. */
+    /* Right-side property panel — material + tiling of the selected faces.
+       Fixed width, anchored right. */
     Fl_Group *panel = new Fl_Group(W - PW, TOP, PW, H - TOP);
     panel->box(FL_UP_BOX);
     Fl_Box *ptitle = new Fl_Box(W - PW, TOP, PW, 22, "Properties");
     ptitle->labelfont(FL_HELVETICA_BOLD);
     ptitle->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
+
+    int px = W - PW + 74, pw = PW - 82, yy = TOP + 34;
+    Fl_Choice      *mc = new Fl_Choice(px, yy, pw, 22, "Material:");     yy += 28;
+    Fl_Button      *ab = new Fl_Button(W - PW + 8, yy, PW - 16, 22, "Add Material"); yy += 30;
+    Fl_Input       *di = new Fl_Input(px, yy, pw, 22, "Diffuse:");       yy += 30;
+    Fl_Value_Input *si = new Fl_Value_Input(px, yy, pw, 22, "Tile Scale:"); yy += 26;
+    Fl_Value_Input *ox = new Fl_Value_Input(px, yy, pw, 22, "Offset X:");   yy += 26;
+    Fl_Value_Input *oy = new Fl_Value_Input(px, yy, pw, 22, "Offset Y:");   yy += 26;
+    si->range(0.01, 64.0); si->step(0.05); si->value(1.0);
+    ox->range(-64.0, 64.0); ox->step(0.05); ox->value(0.0);
+    oy->range(-64.0, 64.0); oy->step(0.05); oy->value(0.0);
+    di->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
     panel->end();
     panel->resizable(NULL);
 
@@ -1028,6 +1157,16 @@ int main(int argc, char **argv)
     bEdge->callback(modeButtonCb, view);
     bFace->callback(modeButtonCb, view);
     view->applyMode(SEL_VERT);
+
+    /* Wire the property panel (widgets built above, in the panel group). */
+    view->matChoice = mc; view->diffuseInput = di;
+    view->scaleInput = si; view->offXInput = ox; view->offYInput = oy;
+    mc->callback(matChoiceCb, view);
+    ab->callback(addMatCb, view);
+    di->callback(diffuseCb, view);
+    si->callback(tilingCb, view);
+    ox->callback(tilingCb, view);
+    oy->callback(tilingCb, view);
 
     /* Menu items (added after `view` exists for the Edit callbacks). Stash the
        Undo/Redo item indices so the view can grey them out when empty. */

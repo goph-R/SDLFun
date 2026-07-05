@@ -120,8 +120,8 @@ polish-tail.
 | **M2** | **Grab** with axis-lock + live 1 cm snap; **snapshot undo**. | **done** |
 | **M3** | **Make-face (F)**, flip, delete, **Add Cube/Plane** seeds. | **done** |
 | **M4** | **Extrude** *(the core verb)* — select faces, push out, auto-grab. | **done** |
-| **M5** | Materials panel: per-face assign + tiling spinners, live. | **in progress** |
-| M6 | `.lvl` save/load + OBJ/MTL export; round-trip a Blender bake. | |
+| **M5** | Materials panel: per-face assign + tiling spinners, live. | **done** |
+| **M6** | `.lvl` save/load + OBJ/MTL export; round-trip a Blender bake. | **in progress** |
 | polish | Merge-by-distance, recalc-normals, gizmos, box-select, loop-select, numeric entry, snap toggle. | |
 
 ## Spine
