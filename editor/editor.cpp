@@ -139,10 +139,14 @@ public:
     Fl_Menu_Bar  *menuBar;      /* Edit menu, for greying out Undo/Redo */
     int           undoIdx, redoIdx;
 
-    /* M5 property-panel widgets (material + tiling of the selected faces). */
+    /* Property-panel widgets. faceGroup (material + tiling) and vertGroup
+       (X/Y/Z) overlap; refreshPanel shows whichever fits the mode + selection. */
+    Fl_Group       *propPanel, *faceGroup, *vertGroup;
     Fl_Choice      *matChoice;
     Fl_Input       *diffuseInput;
     Fl_Value_Input *scaleInput, *offXInput, *offYInput;
+    Fl_Value_Input *vxInput, *vyInput, *vzInput;
+    int             panelVert;   /* the vertex the X/Y/Z fields edit, or -1 */
 
     /* M2 grab (modal move): active while `grabbing`. The affected verts and
        their pre-grab positions are captured at start; the mouse delta
@@ -166,7 +170,9 @@ public:
           loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
           bVert(0), bEdge(0), bFace(0),
           menuBar(0), undoIdx(-1), redoIdx(-1),
+          propPanel(0), faceGroup(0), vertGroup(0),
           matChoice(0), diffuseInput(0), scaleInput(0), offXInput(0), offYInput(0),
+          vxInput(0), vyInput(0), vzInput(0), panelVert(-1),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
@@ -492,6 +498,7 @@ public:
         if (bVert) bVert->value(m == SEL_VERT);
         if (bEdge) bEdge->value(m == SEL_EDGE);
         if (bFace) bFace->value(m == SEL_FACE);
+        refreshPanel();
         redraw();
     }
 
@@ -598,7 +605,7 @@ public:
 
     void grabUpdate(int mx, int my) { grabCurX = mx; grabCurY = my; grabApply(); }
 
-    void grabConfirm() { grabEnd(); redraw(); }   /* snapshot already on the stack */
+    void grabConfirm() { grabEnd(); refreshPanel(); redraw(); }   /* snapshot already on stack */
 
     void grabCancel()
     {
@@ -615,6 +622,7 @@ public:
         editHistoryDropUndoTop(&hist);            /* back to pre-grab: drop it */
         grabEnd();
         updateMenuEnabled();
+        refreshPanel();
         redraw();
     }
 
@@ -879,10 +887,9 @@ public:
         else if (emesh.numMats > 0)            matChoice->value(0);
     }
 
-    /* Show the selected faces' material (or the current choice) in the widgets. */
-    void refreshPanel()
+    /* Show the selected faces' material in the face-props widgets. */
+    void refreshFacePanel()
     {
-        if (!matChoice) return;
         int id = -1, i;
         for (i = 0; i < emesh.numFaces; i++)
             if (sel.faceSel[i]) { id = emesh.faces[i].materialId; break; }
@@ -894,6 +901,52 @@ public:
         offXInput->value(emesh.mats[id].tilingOffsetX);
         offYInput->value(emesh.mats[id].tilingOffsetY);
         diffuseInput->value(emesh.mats[id].diffusePath);
+    }
+
+    void refreshVertPanel(int vi)
+    {
+        panelVert = vi;
+        vxInput->value(emesh.verts[vi].pos.x);
+        vyInput->value(emesh.verts[vi].pos.y);
+        vzInput->value(emesh.verts[vi].pos.z);
+    }
+
+    /* Pick the sub-panel to show from mode + selection:
+       vertex mode with exactly one vert -> X/Y/Z position;
+       face mode with any faces selected -> material/tiling;
+       otherwise (incl. edge mode)       -> empty. */
+    void refreshPanel()
+    {
+        if (!faceGroup || !vertGroup) return;
+        if (sel.mode == SEL_FACE) {
+            int n = 0;
+            for (int i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) n++;
+            vertGroup->hide();
+            if (n > 0) { faceGroup->show(); refreshFacePanel(); }
+            else         faceGroup->hide();
+        } else if (sel.mode == SEL_VERT) {
+            int one = -1, n = 0;
+            for (int i = 0; i < emesh.numVerts; i++) if (sel.vertSel[i]) { one = i; n++; }
+            faceGroup->hide();
+            if (n == 1) { vertGroup->show(); refreshVertPanel(one); }
+            else        { vertGroup->hide(); panelVert = -1; }
+        } else {
+            faceGroup->hide(); vertGroup->hide(); panelVert = -1;
+        }
+        if (propPanel) propPanel->redraw();
+    }
+
+    /* Edit the shown vertex's position from the X/Y/Z fields (snapped, undoable). */
+    void onVertPosChanged()
+    {
+        if (panelVert < 0 || panelVert >= emesh.numVerts) return;
+        editHistoryPush(&hist, &emesh);
+        emesh.verts[panelVert].pos.x = editSnap((float)vxInput->value());
+        emesh.verts[panelVert].pos.y = editSnap((float)vyInput->value());
+        emesh.verts[panelVert].pos.z = editSnap((float)vzInput->value());
+        editMeshBuild(&emesh, &eobj);
+        updateMenuEnabled();
+        redraw();
     }
 
     /* Live-edit the current material's tiling (shared by every face using it). */
@@ -1133,6 +1186,7 @@ static void matChoiceCb(Fl_Widget *, void *v) { ((EditorView *)v)->onMaterialCho
 static void addMatCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onAddMaterial(); }
 static void diffuseCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onDiffuseChanged(); }
 static void tilingCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onTilingChanged(); }
+static void vertPosCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onVertPosChanged(); }
 
 int main(int argc, char **argv)
 {
@@ -1167,25 +1221,44 @@ int main(int argc, char **argv)
     toolbar->end();
     toolbar->resizable(NULL);          /* buttons stay put when the window resizes */
 
-    /* Right-side property panel — material + tiling of the selected faces.
-       Fixed width, anchored right. */
+    /* Right-side property panel. Two sub-groups overlap the area below the
+       title; refreshPanel() shows the one matching the mode + selection. */
     Fl_Group *panel = new Fl_Group(W - PW, TOP, PW, H - TOP);
     panel->box(FL_UP_BOX);
     Fl_Box *ptitle = new Fl_Box(W - PW, TOP, PW, 22, "Properties");
     ptitle->labelfont(FL_HELVETICA_BOLD);
     ptitle->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
 
-    int px = W - PW + 74, pw = PW - 82, yy = TOP + 34;
-    Fl_Choice      *mc = new Fl_Choice(px, yy, pw, 22, "Material:");     yy += 28;
-    Fl_Button      *ab = new Fl_Button(W - PW + 8, yy, PW - 16, 22, "Add Material"); yy += 30;
-    Fl_Input       *di = new Fl_Input(px, yy, pw, 22, "Diffuse:");       yy += 30;
-    Fl_Value_Input *si = new Fl_Value_Input(px, yy, pw, 22, "Tile Scale:"); yy += 26;
-    Fl_Value_Input *ox = new Fl_Value_Input(px, yy, pw, 22, "Offset X:");   yy += 26;
-    Fl_Value_Input *oy = new Fl_Value_Input(px, yy, pw, 22, "Offset Y:");   yy += 26;
+    int px = W - PW + 74, pw = PW - 82;
+
+    /* Face props: material + tiling (face mode, faces selected). */
+    Fl_Group *faceGroup = new Fl_Group(W - PW, TOP + 28, PW, H - TOP - 28);
+    int fy = TOP + 34;
+    Fl_Choice      *mc = new Fl_Choice(px, fy, pw, 22, "Material:");     fy += 28;
+    Fl_Button      *ab = new Fl_Button(W - PW + 8, fy, PW - 16, 22, "Add Material"); fy += 30;
+    Fl_Input       *di = new Fl_Input(px, fy, pw, 22, "Diffuse:");       fy += 30;
+    Fl_Value_Input *si = new Fl_Value_Input(px, fy, pw, 22, "Tile Scale:"); fy += 26;
+    Fl_Value_Input *ox = new Fl_Value_Input(px, fy, pw, 22, "Offset X:");   fy += 26;
+    Fl_Value_Input *oy = new Fl_Value_Input(px, fy, pw, 22, "Offset Y:");   fy += 26;
     si->range(0.01, 64.0); si->step(0.05); si->value(1.0);
     ox->range(-64.0, 64.0); ox->step(0.05); ox->value(0.0);
     oy->range(-64.0, 64.0); oy->step(0.05); oy->value(0.0);
     di->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    faceGroup->end();
+
+    /* Vertex props: X/Y/Z position (vertex mode, exactly one vert). */
+    Fl_Group *vertGroup = new Fl_Group(W - PW, TOP + 28, PW, H - TOP - 28);
+    int vyy = TOP + 40;
+    Fl_Value_Input *vx = new Fl_Value_Input(px, vyy, pw, 22, "X:"); vyy += 28;
+    Fl_Value_Input *vy = new Fl_Value_Input(px, vyy, pw, 22, "Y:"); vyy += 28;
+    Fl_Value_Input *vz = new Fl_Value_Input(px, vyy, pw, 22, "Z:"); vyy += 28;
+    vx->step(0.01); vy->step(0.01); vz->step(0.01);
+    vx->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    vy->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    vz->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    vertGroup->end();
+
+    faceGroup->hide(); vertGroup->hide();        /* refreshPanel reveals one */
     panel->end();
     panel->resizable(NULL);
 
@@ -1204,15 +1277,20 @@ int main(int argc, char **argv)
     bFace->callback(modeButtonCb, view);
     view->applyMode(SEL_VERT);
 
-    /* Wire the property panel (widgets built above, in the panel group). */
+    /* Wire the property panel (widgets built above, in the panel groups). */
+    view->propPanel = panel; view->faceGroup = faceGroup; view->vertGroup = vertGroup;
     view->matChoice = mc; view->diffuseInput = di;
     view->scaleInput = si; view->offXInput = ox; view->offYInput = oy;
+    view->vxInput = vx; view->vyInput = vy; view->vzInput = vz;
     mc->callback(matChoiceCb, view);
     ab->callback(addMatCb, view);
     di->callback(diffuseCb, view);
     si->callback(tilingCb, view);
     ox->callback(tilingCb, view);
     oy->callback(tilingCb, view);
+    vx->callback(vertPosCb, view);
+    vy->callback(vertPosCb, view);
+    vz->callback(vertPosCb, view);
 
     /* Menu items (added after `view` exists for the Edit callbacks). Stash the
        Undo/Redo item indices so the view can grey them out when empty. */
