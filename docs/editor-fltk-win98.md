@@ -1,7 +1,7 @@
 # Building FLTK for the SOOB Level Editor on Windows 98
 
-The SOOB level editor (`editor.cpp`, built by `build_editor.bat`) uses **FLTK**
-for its window + GL viewport. FLTK does not ship a Win98 binary, so you build it
+The SOOB level editor (`editor/editor.cpp`, built by `editor/build_editor.bat`)
+uses **FLTK** for its window + GL viewport. FLTK does not ship a Win98 binary, so you build it
 yourself, once, with the same Dev-C++ MinGW 3.4 toolchain the engine uses. This
 doc is that recipe.
 
@@ -106,9 +106,12 @@ and `-D*_FLAGS="-DWINVER=0x0500 -D_WIN32_WINNT=0x0500"`.)
 
 ## Then build the editor
 
-Run `build_editor.bat` from the engine root. Its `FLTK` variable already points
-at `vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced
-the libs yet. It compiles `editor.cpp` with `-DWIN32 -I%FLTK%` and links
+Run `editor\build_editor.bat` from the engine root (its internal paths are
+relative to that root, so stay there — don't `cd` into `editor\`). Its `FLTK`
+variable already points at `vendor\fltk-1.3\FL`, and it errors early if
+`build_fltk.bat` hasn't produced the libs yet. It compiles `editor\editor.cpp`
+with `-DWIN32 -I. -I%FLTK%` (the `-I.` picks up the engine-root headers the
+editor includes by bare name now that it lives in `editor\`) and links
 `-lfltk_gl -lfltk` plus Bullet, Lua, and Win32 GL/GDI. No SDL, OpenAL, or
 vorbis — the `game.h` / `game_session.h` split keeps the script/UI/audio
 runtime out of the editor TU. Lua alone is linked, only so `edit_assets.h` can
@@ -121,8 +124,12 @@ like the game.
 
 ## Related
 
-- `editor.cpp` — the editor skeleton (free-fly camera, grid + axis overlay).
-- `render_level.h` / `render_world.h` / `edit_load.h` — the shared engine render
-  path the editor draws through (identical to what the game ships).
+- `editor/editor.cpp` — the editor skeleton (free-fly camera, grid + axis
+  overlay); all editor code lives under `editor/`, separate from the game TU.
+- `editor/edit_mesh.h` / `edit_mesh_build.h` — the editor's native mesh and its
+  triangulation into the engine's `ObjMesh`. See `docs/editor-modeling-plan.md`.
+- `render_level.h` / `render_world.h` — the shared engine render path the editor
+  draws through (identical to what the game ships); these stay at the engine
+  root because `main.cpp` uses them too.
 - `game_session.h` — where `gameInit`/`gameFree` moved so `game.h` (the struct)
   can be included without the script/UI/audio runtime.

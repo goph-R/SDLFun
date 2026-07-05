@@ -66,12 +66,15 @@ if exist %OBJDIR%\lua.o (
 )
 
 REM ----------------------------------------------------------------
-REM  Compile the editor. -I%ENGINE% resolves SOOB-Core headers
-REM  (texture.h, asset_registry.h); -I%FLTK% resolves <FL/...>;
-REM  the lua src path resolves edit_assets.h's <lua.h>.
+REM  Compile the editor. editor.cpp now lives in editor\, so -I. adds the
+REM  engine-root headers it includes by bare name (obj_loader.h, game.h,
+REM  render_level.h, ...). -I%ENGINE% resolves SOOB-Core headers (texture.h,
+REM  asset_registry.h); -I%FLTK% resolves <FL/...>; the lua src path resolves
+REM  edit_assets.h's <lua.h>. The editor's own edit_*.h resolve next to
+REM  editor.cpp automatically. Run this from the repo root.
 REM ----------------------------------------------------------------
 echo Compiling editor...
-C:\Dev-Cpp\bin\g++.exe -DWIN32 -DWINVER=0x0500 -D_WIN32_WINNT=0x0500 -I%ENGINE% -I%FLTK% -Ivendor\bullet3-3.25\src -I%ENGINE%\vendor\lua-5.1.5\src -O2 -c editor.cpp -o %OBJDIR%\editor.o
+C:\Dev-Cpp\bin\g++.exe -DWIN32 -DWINVER=0x0500 -D_WIN32_WINNT=0x0500 -I. -I%ENGINE% -I%FLTK% -Ivendor\bullet3-3.25\src -I%ENGINE%\vendor\lua-5.1.5\src -O2 -c editor\editor.cpp -o %OBJDIR%\editor.o
 if errorlevel 1 goto error
 
 REM ----------------------------------------------------------------

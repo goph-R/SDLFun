@@ -74,6 +74,8 @@ static void conLogf(const char *fmt, ...)
 #include "render_world.h"
 #include "edit_load.h"
 #include "edit_assets.h"     /* minimal assets.lua -> AssetRegistry (models+textures) */
+#include "edit_mesh.h"       /* editor native mesh (verts/faces, 1 cm snap)          */
+#include "edit_mesh_build.h" /* EditMesh -> ObjMesh for the engine renderer          */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -96,6 +98,12 @@ public:
     int           loaded;      /* level loaded OK */
     int           bootstrapped; /* GL init + load done (needs live context) */
 
+    /* M0: the editor's own mesh (a demo cube for now) rendered through the
+       new EditMesh -> ObjMesh -> engine path, alongside the loaded level. */
+    EditMesh      emesh;
+    ObjMesh       eobj;
+    int           haveEmesh;
+
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
     float yaw, pitch;
@@ -105,7 +113,7 @@ public:
         : Fl_Gl_Window(X, Y, W, H),
           objPath("assets/levels/test_level.obj"),
           entPath("assets/levels/test_level.ent"),
-          loaded(0), bootstrapped(0),
+          loaded(0), bootstrapped(0), haveEmesh(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
@@ -156,6 +164,26 @@ public:
             loaded = editLoadLevel(&scene, objPath, entPath, &assetReg);
             if (!loaded)
                 conLogf("editor: failed to load %s / %s\n", objPath, entPath);
+
+            /* M0: seed a hardcoded 2 m cube through the editor-mesh path. It
+               borrows the loaded level's first material so it's textured with a
+               real box-mapped diffuse; falls back to flat grey otherwise. */
+            editMeshInit(&emesh);
+            if (loaded && scene.level.numMaterials > 0) {
+                emesh.mats[0] = scene.level.materials[0];
+            } else {
+                memset(&emesh.mats[0], 0, sizeof(Material));
+                strcpy(emesh.mats[0].name, "editor_default");
+                emesh.mats[0].tilingScale = 1.0f;
+            }
+            emesh.numMats = 1;
+            editAddCube(&emesh, 0.0f, 1.0f, -4.0f, 2.0f, 2.0f, 2.0f, 0);
+            objInit(&eobj);
+            editMeshBuild(&emesh, &eobj);
+            haveEmesh = (loaded != 0);   /* renderer needs scene.texCache valid */
+            conLogf("editor: demo cube built (%d tris, %d sectors)\n",
+                    eobj.numTris, eobj.numSectors);
+
             bootstrapped = 1;
         }
 
@@ -181,6 +209,14 @@ public:
 
         if (loaded)
             renderWorld(&scene, cam);
+
+        /* M0: draw the editor mesh through the same engine path. renderWorld
+           leaves GL_LIGHTING enabled; the cube has no lightmap, so it takes the
+           box-mapped diffuse + GL_LIGHT0 branch. */
+        if (haveEmesh) {
+            glEnable(GL_LIGHTING);
+            renderLevelSectored(&eobj, &scene.texCache);
+        }
 
         drawOverlay();
     }

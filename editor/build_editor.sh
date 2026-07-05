@@ -21,11 +21,11 @@ if [ ! -f bullet_linear_math.o ] || [ ! -f lua.o ]; then
     echo "ERROR: Bullet/Lua objects missing — run 'make' first to build them."; exit 1
 fi
 
-CXXFLAGS="$(fltk-config --use-gl --cxxflags) -I$ENGINE -Ivendor/bullet3-3.25/src -I$ENGINE/vendor/lua-5.1.5/src -O2"
+CXXFLAGS="$(fltk-config --use-gl --cxxflags) -I. -I$ENGINE -Ivendor/bullet3-3.25/src -I$ENGINE/vendor/lua-5.1.5/src -O2"
 LDFLAGS="$(fltk-config --use-gl --ldflags) -lGL -lm"
 
 echo "Compiling editor.cpp..."
-g++ -c editor.cpp -o "$OBJDIR/editor.o" $CXXFLAGS
+g++ -c editor/editor.cpp -o "$OBJDIR/editor.o" $CXXFLAGS
 
 echo "Linking soob_editor..."
 g++ "$OBJDIR/editor.o" \
