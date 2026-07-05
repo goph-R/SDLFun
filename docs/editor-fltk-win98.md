@@ -106,12 +106,13 @@ and `-D*_FLAGS="-DWINVER=0x0500 -D_WIN32_WINNT=0x0500"`.)
 
 ## Then build the editor
 
-Run `editor\build_editor.bat` from the engine root (its internal paths are
-relative to that root, so stay there — don't `cd` into `editor\`). Its `FLTK`
-variable already points at `vendor\fltk-1.3\FL`, and it errors early if
-`build_fltk.bat` hasn't produced the libs yet. It compiles `editor\editor.cpp`
-with `-DWIN32 -I. -I%FLTK%` (the `-I.` picks up the engine-root headers the
-editor includes by bare name now that it lives in `editor\`) and links
+Run `build_editor.bat` from **inside the `editor\` folder** (where it lives).
+It sets `REPO=..` and routes every path through it — Win98-safe, since
+`command.com` has no `%~dp0`/`pushd` — so `FLTK` resolves to
+`..\vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced
+the libs yet. It compiles the local `editor.cpp` with `-DWIN32 -I%REPO%`
+(picking up the engine-root headers the editor includes by bare name) and
+writes `SoobEditor.exe` to the repo root. It links
 `-lfltk_gl -lfltk` plus Bullet, Lua, and Win32 GL/GDI. No SDL, OpenAL, or
 vorbis — the `game.h` / `game_session.h` split keeps the script/UI/audio
 runtime out of the editor TU. Lua alone is linked, only so `edit_assets.h` can
