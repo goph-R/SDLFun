@@ -26,8 +26,8 @@
  *     ./soob_editor [level.obj] [level.ent]
  * defaults to assets/levels/test_level.{obj,ent}.
  *
- * Controls: left-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
- * click = select, Shift+click = add/toggle, 1/2/3 = vertex/edge/face mode.
+ * Controls: right-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
+ * left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face.
  */
 
 #ifdef _WIN32
@@ -39,6 +39,8 @@
 #include <FL/Fl_Window.H>
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Pixmap.H>
 #include <FL/gl.h>
 
 #include <cstdio>
@@ -46,6 +48,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+
+/* Toolbar select-mode icons — embedded XPM pixmaps. Draw them in
+   editor/icons/*.xpm (keep the array names). */
+#include "icons/mode_vert.xpm"
+#include "icons/mode_edge.xpm"
+#include "icons/mode_face.xpm"
 
 /* The engine's header-only modules all call conLogf() (the game routes it to
    its dev console). The editor has no console, so provide a plain stdout sink
@@ -110,6 +118,9 @@ public:
     EditSelection sel;          /* M1: vert/edge/face selection */
     int           pushX, pushY; /* mouse-down point, for click-vs-drag */
 
+    /* Toolbar mode buttons (radio); kept in sync with sel.mode both ways. */
+    Fl_Button    *bVert, *bEdge, *bFace;
+
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
     float yaw, pitch;
@@ -120,6 +131,7 @@ public:
           objPath("assets/levels/test_level.obj"),
           entPath("assets/levels/test_level.ent"),
           loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
+          bVert(0), bEdge(0), bFace(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
@@ -428,6 +440,18 @@ public:
         redraw();
     }
 
+    /* Set the selection mode and keep the toolbar radio buttons in sync — used
+       by both the 1/2/3 keys and the toolbar button callbacks. Setting a radio
+       button's value() doesn't clear its siblings, so set all three. */
+    void applyMode(EditSelMode m)
+    {
+        sel.mode = m;
+        if (bVert) bVert->value(m == SEL_VERT);
+        if (bEdge) bEdge->value(m == SEL_EDGE);
+        if (bFace) bFace->value(m == SEL_FACE);
+        redraw();
+    }
+
     int handle(int e)
     {
         switch (e) {
@@ -437,10 +461,12 @@ public:
             take_focus();
             return 1;
         case FL_RELEASE: {
-            /* A press+release that barely moved is a click -> select. */
+            /* Left click (press+release that barely moved) = select. Right
+               button is camera-only, so it never selects. */
             int dx = Fl::event_x() - pushX;
             int dy = Fl::event_y() - pushY;
-            if (haveEmesh && dx * dx + dy * dy <= 16) {
+            if (Fl::event_button() == FL_LEFT_MOUSE && haveEmesh &&
+                dx * dx + dy * dy <= 16) {
                 /* EditorView is an Fl_Gl_Window (a subwindow), so event coords
                    are already local to the viewport — do NOT subtract x()/y(),
                    or the toolbar height gets double-counted and picks land ~30px
@@ -457,11 +483,15 @@ public:
             int dy = Fl::event_y() - lastY;
             lastX = Fl::event_x();
             lastY = Fl::event_y();
-            yaw   += dx * 0.005f;
-            pitch -= dy * 0.005f;
-            if (pitch >  1.55f) pitch =  1.55f;
-            if (pitch < -1.55f) pitch = -1.55f;
-            redraw();
+            /* Right-drag orbits the camera; left-drag is reserved for selection
+               (no rotation), so a left click-select never fights the look. */
+            if (Fl::event_state() & FL_BUTTON3) {
+                yaw   += dx * 0.005f;
+                pitch -= dy * 0.005f;
+                if (pitch >  1.55f) pitch =  1.55f;
+                if (pitch < -1.55f) pitch = -1.55f;
+                redraw();
+            }
             return 1;
         }
         case FL_MOUSEWHEEL: {
@@ -482,9 +512,9 @@ public:
             /* 1/2/3 switch selection mode (Blender-style). WASD/QE movement is
                polled by the frame timer, so it's untouched here. */
             int k = Fl::event_key();
-            if (k == '1') { sel.mode = SEL_VERT; redraw(); return 1; }
-            if (k == '2') { sel.mode = SEL_EDGE; redraw(); return 1; }
-            if (k == '3') { sel.mode = SEL_FACE; redraw(); return 1; }
+            if (k == '1') { applyMode(SEL_VERT); return 1; }
+            if (k == '2') { applyMode(SEL_EDGE); return 1; }
+            if (k == '3') { applyMode(SEL_FACE); return 1; }
             return 1;
         }
         case FL_KEYUP:
@@ -503,11 +533,14 @@ static void frameTimer(void *v)
     Fl::repeat_timeout(1.0 / 60.0, frameTimer, v);
 }
 
-/* Placeholder toolbar actions — just log which button was pressed for now.
-   These are stubs to hang real editor commands off of later. */
-static void toolbarCb(Fl_Widget *w, void *)
+/* Toolbar select-mode buttons: route through the same applyMode() the 1/2/3
+   keys use, so keyboard and toolbar stay in sync. */
+static void modeButtonCb(Fl_Widget *w, void *v)
 {
-    conLogf("[toolbar] %s\n", w->label());
+    EditorView *view = (EditorView *)v;
+    if (w == view->bVert)      view->applyMode(SEL_VERT);
+    else if (w == view->bEdge) view->applyMode(SEL_EDGE);
+    else                       view->applyMode(SEL_FACE);
 }
 
 int main(int argc, char **argv)
@@ -516,41 +549,54 @@ int main(int argc, char **argv)
 
     const int W = 1024, H = 768;
     const int TB = 30;                 /* toolbar height */
+    const int PW = 220;                /* right property-panel width */
 
     Fl_Window *win = new Fl_Window(W, H, "SOOB Level Editor");
     win->begin();
 
-    /* Toolbar strip across the top. Fixed height; the buttons are fake for
-       now (they only log). A gap after "Save" and after "Scale" groups them
-       into file / transform / playback clusters. */
+    /* Toolbar: select-mode radio buttons, icons from editor/icons/*.xpm.
+       FL_RADIO_BUTTON gives one-lit-at-a-time behaviour for free. */
     Fl_Group *toolbar = new Fl_Group(0, 0, W, TB);
     toolbar->box(FL_UP_BOX);
-    {
-        static const char *labels[] = {
-            "New", "Open", "Save", "Select", "Move", "Rotate", "Scale", "Play"
-        };
-        const int n = (int)(sizeof(labels) / sizeof(labels[0]));
-        int x = 4;
-        for (int i = 0; i < n; i++) {
-            if (i == 3 || i == 7) x += 8;          /* cluster gaps */
-            Fl_Button *b = new Fl_Button(x, 3, 54, TB - 6, labels[i]);
-            b->callback(toolbarCb);
-            x += 54 + 2;
-        }
-    }
+    Fl_Button *bVert = new Fl_Button(4,  3, 34, TB - 6);
+    Fl_Button *bEdge = new Fl_Button(40, 3, 34, TB - 6);
+    Fl_Button *bFace = new Fl_Button(76, 3, 34, TB - 6);
+    bVert->image(new Fl_Pixmap(mode_vert_xpm)); bVert->type(FL_RADIO_BUTTON);
+    bEdge->image(new Fl_Pixmap(mode_edge_xpm)); bEdge->type(FL_RADIO_BUTTON);
+    bFace->image(new Fl_Pixmap(mode_face_xpm)); bFace->type(FL_RADIO_BUTTON);
+    bVert->tooltip("Vertex select (1)");
+    bEdge->tooltip("Edge select (2)");
+    bFace->tooltip("Face select (3)");
     toolbar->end();
     toolbar->resizable(NULL);          /* buttons stay put when the window resizes */
 
-    /* GL viewport fills everything below the toolbar. */
-    EditorView *view = new EditorView(0, TB, W, H - TB);
+    /* Right-side property panel — placeholder for now (future per-element
+       material / tiling / transform editing). Fixed width, anchored right. */
+    Fl_Group *panel = new Fl_Group(W - PW, TB, PW, H - TB);
+    panel->box(FL_UP_BOX);
+    Fl_Box *ptitle = new Fl_Box(W - PW, TB, PW, 22, "Properties");
+    ptitle->labelfont(FL_HELVETICA_BOLD);
+    ptitle->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
+    panel->end();
+    panel->resizable(NULL);
+
+    /* GL viewport fills the area left of the panel, below the toolbar. */
+    EditorView *view = new EditorView(0, TB, W - PW, H - TB);
     if (argc > 1) view->objPath = argv[1];
     if (argc > 2) view->entPath = argv[2];
 
     win->end();
     win->resizable(view);              /* only the viewport grows/shrinks */
 
-    conLogf("SOOB Level Editor — left-drag look, WASD move, Q/E down/up, wheel dolly\n");
-    conLogf("  click = select, Shift+click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
+    /* Wire the toolbar buttons to the view, then light the initial mode. */
+    view->bVert = bVert; view->bEdge = bEdge; view->bFace = bFace;
+    bVert->callback(modeButtonCb, view);
+    bEdge->callback(modeButtonCb, view);
+    bFace->callback(modeButtonCb, view);
+    view->applyMode(SEL_VERT);
+
+    conLogf("SOOB Level Editor — right-drag look, WASD move, Q/E down/up, wheel dolly\n");
+    conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);
