@@ -56,6 +56,14 @@ int main(void)
     /* A point behind the camera does not project. */
     CHECK(editProject(&c, editV3(0, 1, 10), &sx, &sy) == 0);
 
+    /* Occlusion: vert 0 = (-1,0,-1) is a BACK corner, hidden behind the front
+       faces. Picking at its screen position must NOT return it (front-most +
+       occlusion), and editOccluded must flag it while a front corner is clear. */
+    CHECK(editOccluded(&m, c.eye, m.verts[0].pos) == 1);   /* back corner hidden */
+    CHECK(editOccluded(&m, c.eye, m.verts[5].pos) == 0);   /* front corner clear */
+    editProject(&c, m.verts[0].pos, &sx, &sy);
+    CHECK(editPickVertex(&c, &m, sx, sy, 8.0f) != 0);      /* never the hidden vert */
+
     /* Pick an edge by aiming at the midpoint of the two front-top verts
        (6=(1,2,1), 7=(-1,2,1)); expect the edge {6,7}. */
     float ax, ay, bx, by;

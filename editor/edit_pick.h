@@ -9,6 +9,13 @@
  * keeping with the engine's no-GLU, manual-matrix approach. The caller fills a
  * PickCam from the editor camera each time it picks.
  *
+ * Selection rules (so it behaves like Blender, not a flat 2D hit-test):
+ *   - Among elements within the pixel tolerance, the one NEAREST the camera
+ *     wins (front-most), instead of whichever projects closest to the cursor.
+ *   - Occluded elements (a face between them and the eye) are skipped, so you
+ *     can't grab a vertex/edge hidden behind a wall.
+ *   Faces are already both — editPickFace keeps the nearest ray hit.
+ *
  * Pixel convention: mouse (mx,my) is viewport-local, origin top-left, y down —
  * exactly what projection here produces, so they compare directly.
  *
@@ -56,6 +63,12 @@ static int editProject(const PickCam *c, Vec3 p, float *sx, float *sy)
     return 1;
 }
 
+/* View-space depth of a world point (distance along the forward axis). */
+static float editDepth(const PickCam *c, Vec3 p)
+{
+    return editV3Dot(editV3Sub(p, c->eye), c->forward);
+}
+
 /* World-space ray through a viewport pixel (origin = eye). */
 static void editMakeRay(const PickCam *c, float mx, float my, Vec3 *o, Vec3 *dir)
 {
@@ -68,55 +81,8 @@ static void editMakeRay(const PickCam *c, float mx, float my, Vec3 *o, Vec3 *dir
     *dir = editV3Norm(d);
 }
 
-/* Nearest vertex within radiusPx of the mouse, or -1. */
-static int editPickVertex(const PickCam *c, EditMesh *m,
-                          float mx, float my, float radiusPx)
-{
-    int best = -1;
-    float bestD2 = radiusPx * radiusPx;
-    int i;
-    for (i = 0; i < m->numVerts; i++) {
-        float sx, sy;
-        if (!editProject(c, m->verts[i].pos, &sx, &sy)) continue;
-        float dx = sx - mx, dy = sy - my;
-        float d2 = dx * dx + dy * dy;
-        if (d2 <= bestD2) { bestD2 = d2; best = i; }
-    }
-    return best;
-}
-
-/* Squared distance from point (px,py) to segment (ax,ay)-(bx,by), in pixels. */
-static float editSegDist2(float px, float py, float ax, float ay,
-                          float bx, float by)
-{
-    float vx = bx - ax, vy = by - ay;
-    float wx = px - ax, wy = py - ay;
-    float len2 = vx * vx + vy * vy;
-    float t = (len2 > 1e-6f) ? (wx * vx + wy * vy) / len2 : 0.0f;
-    if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
-    float cx = ax + t * vx, cy = ay + t * vy;
-    float dx = px - cx, dy = py - cy;
-    return dx * dx + dy * dy;
-}
-
-/* Nearest edge within radiusPx of the mouse, or -1. */
-static int editPickEdge(const PickCam *c, EditMesh *m, EditEdge *edges,
-                        int numEdges, float mx, float my, float radiusPx)
-{
-    int best = -1;
-    float bestD2 = radiusPx * radiusPx;
-    int i;
-    for (i = 0; i < numEdges; i++) {
-        float ax, ay, bx, by;
-        if (!editProject(c, m->verts[edges[i].a].pos, &ax, &ay)) continue;
-        if (!editProject(c, m->verts[edges[i].b].pos, &bx, &by)) continue;
-        float d2 = editSegDist2(mx, my, ax, ay, bx, by);
-        if (d2 <= bestD2) { bestD2 = d2; best = i; }
-    }
-    return best;
-}
-
-/* Möller–Trumbore ray/triangle. Writes hit distance t (>0) on success. */
+/* Möller–Trumbore ray/triangle (double-sided). Writes hit distance t (in units
+   of |d|) on success. */
 static int editRayTri(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 cc, float *tOut)
 {
     Vec3 e1 = editV3Sub(b, a), e2 = editV3Sub(cc, a);
@@ -134,6 +100,89 @@ static int editRayTri(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 cc, float *tOut)
     if (t <= 1e-4f) return 0;
     *tOut = t;
     return 1;
+}
+
+/* Is `target` hidden from the eye by some face? Casts eye->target (target at
+   t=1) and reports a hit strictly between them. The eps window keeps faces that
+   merely touch the target (the vert's/edge's own adjacent faces, hit at t~=1)
+   from counting as occluders. */
+static int editOccluded(EditMesh *m, Vec3 eye, Vec3 target)
+{
+    Vec3 d = editV3Sub(target, eye);
+    int i;
+    for (i = 0; i < m->numFaces; i++) {
+        EditFace *f = &m->faces[i];
+        Vec3 v0 = m->verts[f->v[0]].pos;
+        Vec3 v1 = m->verts[f->v[1]].pos;
+        Vec3 v2 = m->verts[f->v[2]].pos;
+        float t;
+        if (editRayTri(eye, d, v0, v1, v2, &t) && t > 1e-3f && t < 1.0f - 1e-3f)
+            return 1;
+        if (f->nv == 4) {
+            Vec3 v3 = m->verts[f->v[3]].pos;
+            if (editRayTri(eye, d, v0, v2, v3, &t) && t > 1e-3f && t < 1.0f - 1e-3f)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/* Squared distance from point (px,py) to segment (ax,ay)-(bx,by), in pixels. */
+static float editSegDist2(float px, float py, float ax, float ay,
+                          float bx, float by)
+{
+    float vx = bx - ax, vy = by - ay;
+    float wx = px - ax, wy = py - ay;
+    float len2 = vx * vx + vy * vy;
+    float t = (len2 > 1e-6f) ? (wx * vx + wy * vy) / len2 : 0.0f;
+    if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
+    float cx = ax + t * vx, cy = ay + t * vy;
+    float dx = px - cx, dy = py - cy;
+    return dx * dx + dy * dy;
+}
+
+/* Nearest-to-camera vertex within radiusPx that isn't occluded, or -1. */
+static int editPickVertex(const PickCam *c, EditMesh *m,
+                          float mx, float my, float radiusPx)
+{
+    int best = -1;
+    float bestDepth = 1e30f;
+    float r2 = radiusPx * radiusPx;
+    int i;
+    for (i = 0; i < m->numVerts; i++) {
+        float sx, sy;
+        if (!editProject(c, m->verts[i].pos, &sx, &sy)) continue;
+        float dx = sx - mx, dy = sy - my;
+        if (dx * dx + dy * dy > r2) continue;                 /* outside tolerance */
+        if (editOccluded(m, c->eye, m->verts[i].pos)) continue;
+        float depth = editDepth(c, m->verts[i].pos);
+        if (depth < bestDepth) { bestDepth = depth; best = i; }
+    }
+    return best;
+}
+
+/* Nearest-to-camera edge within radiusPx that isn't occluded, or -1. Depth and
+   occlusion are sampled at the edge midpoint. */
+static int editPickEdge(const PickCam *c, EditMesh *m, EditEdge *edges,
+                        int numEdges, float mx, float my, float radiusPx)
+{
+    int best = -1;
+    float bestDepth = 1e30f;
+    float r2 = radiusPx * radiusPx;
+    int i;
+    for (i = 0; i < numEdges; i++) {
+        Vec3 pa = m->verts[edges[i].a].pos;
+        Vec3 pb = m->verts[edges[i].b].pos;
+        float ax, ay, bx, by;
+        if (!editProject(c, pa, &ax, &ay)) continue;
+        if (!editProject(c, pb, &bx, &by)) continue;
+        if (editSegDist2(mx, my, ax, ay, bx, by) > r2) continue;
+        Vec3 mid = editV3Scale(editV3Add(pa, pb), 0.5f);
+        if (editOccluded(m, c->eye, mid)) continue;
+        float depth = editDepth(c, mid);
+        if (depth < bestDepth) { bestDepth = depth; best = i; }
+    }
+    return best;
 }
 
 /* Nearest face hit by the mouse ray, or -1. Tests each face's fan triangles. */

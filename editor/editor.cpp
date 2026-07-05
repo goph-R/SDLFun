@@ -229,14 +229,20 @@ public:
         drawOverlay();
     }
 
-    /* M1: draw the edit-mesh wireframe + the current selection. Base wireframe
-       and unselected verts are depth-tested (occlude naturally); the selection
-       highlight is drawn depth-test-off so it always reads clearly. Colours:
-       dark wire, orange (1.0, 0.6, 0.1) selection. */
+    /* M1: draw the edit-mesh wireframe + the current selection. Everything is
+       depth-tested so hidden parts stay hidden (matching the occlusion-aware
+       picking); a small glDepthRange bias pulls the overlay just in front of
+       the coincident surfaces to avoid z-fighting. Colours: dark wire, orange
+       (1.0, 0.6, 0.1) selection. */
     void drawSelectionOverlay()
     {
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
+
+        /* Bias the overlay slightly toward the camera (0.999 vs 1.0) so lines,
+           points and fills sit on top of the coincident geometry, while still
+           being occluded by clearly-nearer faces. */
+        glDepthRange(0.0, 0.999);
 
         /* All edges, thin + dark. */
         glLineWidth(1.0f);
@@ -263,9 +269,7 @@ public:
             glEnd();
         }
 
-        /* Selection highlight — always visible (no depth test). */
-        glDisable(GL_DEPTH_TEST);
-
+        /* Selection highlight — depth-tested (hidden parts stay hidden). */
         if (sel.mode == SEL_FACE) {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -317,7 +321,7 @@ public:
             glPointSize(1.0f);
         }
 
-        glEnable(GL_DEPTH_TEST);
+        glDepthRange(0.0, 1.0);
         glEnable(GL_LIGHTING);
     }
 
@@ -437,8 +441,12 @@ public:
             int dx = Fl::event_x() - pushX;
             int dy = Fl::event_y() - pushY;
             if (haveEmesh && dx * dx + dy * dy <= 16) {
-                int mx = Fl::event_x() - x();
-                int my = Fl::event_y() - y();
+                /* EditorView is an Fl_Gl_Window (a subwindow), so event coords
+                   are already local to the viewport — do NOT subtract x()/y(),
+                   or the toolbar height gets double-counted and picks land ~30px
+                   too high. */
+                int mx = Fl::event_x();
+                int my = Fl::event_y();
                 int add = (Fl::event_state() & FL_SHIFT) ? 1 : 0;
                 doPick((float)mx, (float)my, add);
             }
