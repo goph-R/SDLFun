@@ -31,7 +31,8 @@
  * G = grab/move (X/Y/Z axis-lock, click/Enter confirm, Esc cancel),
  * E = extrude faces, F = make face (3-4 verts), X/Del = delete,
  * Ctrl+Z / Ctrl+Y = undo / redo.
- * Menus: Add (Cube/Plane), Mesh (Extrude / Make Face / Flip Normals / Delete).
+ * Menus: File (Save / Open / Export OBJ), Add (Cube/Plane),
+ * Mesh (Extrude / Make Face / Flip Normals / Delete).
  */
 
 #ifdef _WIN32
@@ -50,6 +51,7 @@
 #include <FL/Fl_Value_Input.H>
 #include <FL/Fl_Pixmap.H>
 #include <FL/fl_ask.H>
+#include <FL/Fl_File_Chooser.H>
 #include <FL/gl.h>
 
 #include <cstdio>
@@ -98,6 +100,7 @@ static void conLogf(const char *fmt, ...)
 #include "edit_pick.h"       /* screen-space + ray picking (no GLU)                  */
 #include "edit_undo.h"       /* whole-mesh snapshot undo/redo                        */
 #include "edit_ops.h"        /* extrude                                              */
+#include "edit_io.h"         /* save/load .lvl + OBJ/MTL export                      */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -627,6 +630,7 @@ public:
             editSelInit(&sel, &emesh);
             applyMode(prev);
         }
+        rebuildMatChoice();          /* materials may differ after undo of an open */
         refreshPanel();
         redraw();
     }
@@ -941,6 +945,43 @@ public:
         conLogf("added material_%d\n", id);
     }
 
+    /* ---- M6: save / load / export --------------------------------------- */
+
+    void doSave()
+    {
+        const char *p = fl_file_chooser("Save Level (.lvl)", "*.lvl", "level.lvl");
+        if (p) editSaveLvl(&emesh, p);
+    }
+
+    void doOpen()
+    {
+        const char *p = fl_file_chooser("Open Level (.lvl)", "*.lvl", 0);
+        if (!p) return;
+        editHistoryPush(&hist, &emesh);          /* opening is undoable */
+        editMeshFree(&emesh);
+        editLoadLvl(&emesh, p);
+        editMeshBuild(&emesh, &eobj);
+        editSelFree(&sel);
+        editSelInit(&sel, &emesh);
+        applyMode(SEL_VERT);
+        rebuildMatChoice();
+        refreshPanel();
+        updateMenuEnabled();
+        redraw();
+    }
+
+    void doExportObj()
+    {
+        const char *p = fl_file_chooser("Export OBJ (+MTL)", "*.obj", "level.obj");
+        if (!p) return;
+        char mtl[512];
+        strncpy(mtl, p, sizeof(mtl) - 1); mtl[sizeof(mtl) - 1] = 0;
+        int n = (int)strlen(mtl);                /* swap .obj -> .mtl, else append */
+        if (n > 4 && strcmp(mtl + n - 4, ".obj") == 0) strcpy(mtl + n - 4, ".mtl");
+        else strncat(mtl, ".mtl", sizeof(mtl) - strlen(mtl) - 1);
+        editExportObj(&emesh, p, mtl);
+    }
+
     int handle(int e)
     {
         switch (e) {
@@ -1035,6 +1076,8 @@ public:
             if (k == 'x' || k == 'X' || k == FL_Delete) { deleteSelected(); return 1; }
             if ((st & FL_CTRL) && (k == 'z' || k == 'Z')) { doUndo(); return 1; }
             if ((st & FL_CTRL) && (k == 'y' || k == 'Y')) { doRedo(); return 1; }
+            /* let Ctrl/Cmd combos through to the menu accelerators (Ctrl+S/O) */
+            if (st & (FL_CTRL | FL_META)) return 0;
             return 1;
         }
         case FL_KEYUP:
@@ -1073,6 +1116,9 @@ static int confirmExit()
 }
 static void menuExitCb(Fl_Widget *, void *v) { if (confirmExit()) ((Fl_Window *)v)->hide(); }
 static void winCloseCb(Fl_Widget *w, void *) { if (confirmExit()) w->hide(); }
+static void menuSaveCb  (Fl_Widget *, void *v) { ((EditorView *)v)->doSave(); }
+static void menuOpenCb  (Fl_Widget *, void *v) { ((EditorView *)v)->doOpen(); }
+static void menuExportCb(Fl_Widget *, void *v) { ((EditorView *)v)->doExportObj(); }
 static void menuUndoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doUndo(); }
 static void menuRedoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doRedo(); }
 static void menuExtrudeCb (Fl_Widget *, void *v) { ((EditorView *)v)->extrudeSelection(); }
@@ -1170,7 +1216,10 @@ int main(int argc, char **argv)
 
     /* Menu items (added after `view` exists for the Edit callbacks). Stash the
        Undo/Redo item indices so the view can grey them out when empty. */
-    menu->add("File/Exit", 0, menuExitCb, win);
+    menu->add("File/Save",          FL_COMMAND + 's', menuSaveCb,   view);
+    menu->add("File/Open...",       FL_COMMAND + 'o', menuOpenCb,   view);
+    menu->add("File/Export OBJ...", 0,                menuExportCb, view);
+    menu->add("File/Exit",          0,                menuExitCb,   win);
     view->menuBar = menu;
     view->undoIdx = menu->add("Edit/Undo", FL_COMMAND + 'z', menuUndoCb, view);
     view->redoIdx = menu->add("Edit/Redo", FL_COMMAND + 'y', menuRedoCb, view);
@@ -1189,6 +1238,7 @@ int main(int argc, char **argv)
     conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
     conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
     conLogf("  E = extrude, F = make face (3-4 verts), X/Del = delete; Add & Mesh menus\n");
+    conLogf("  Ctrl+S save, Ctrl+O open, File > Export OBJ (.lvl native; OBJ+MTL for engine/Blender)\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);
