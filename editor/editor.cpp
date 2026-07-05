@@ -1228,15 +1228,12 @@ int main(int argc, char **argv)
        title; refreshPanel() shows the one matching the mode + selection. */
     Fl_Group *panel = new Fl_Group(W - PW, TOP, PW, H - TOP);
     panel->box(FL_UP_BOX);
-    Fl_Box *ptitle = new Fl_Box(W - PW, TOP, PW, 22, "Properties");
-    ptitle->labelfont(FL_HELVETICA_BOLD);
-    ptitle->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
 
     int px = W - PW + 74, pw = PW - 82;
 
     /* Face props: material + tiling (face mode, faces selected). */
-    Fl_Group *faceGroup = new Fl_Group(W - PW, TOP + 28, PW, H - TOP - 28);
-    int fy = TOP + 34;
+    Fl_Group *faceGroup = new Fl_Group(W - PW, TOP, PW, H - TOP);
+    int fy = TOP + 10;
     Fl_Choice      *mc = new Fl_Choice(px, fy, pw, 22, "Material:");     fy += 28;
     Fl_Button      *ab = new Fl_Button(W - PW + 8, fy, PW - 16, 22, "Add Material"); fy += 30;
     Fl_Input       *di = new Fl_Input(px, fy, pw, 22, "Diffuse:");       fy += 30;
@@ -1253,11 +1250,12 @@ int main(int argc, char **argv)
     faceGroup->end();
 
     /* Vertex props: X/Y/Z position (vertex mode, exactly one vert). */
-    Fl_Group *vertGroup = new Fl_Group(W - PW, TOP + 28, PW, H - TOP - 28);
-    int vyy = TOP + 40;
+    Fl_Group *vertGroup = new Fl_Group(W - PW, TOP, PW, H - TOP);
+    int vyy = TOP + 16;
     Fl_Value_Input *vx = new Fl_Value_Input(px, vyy, pw, 22, "X:"); vyy += 28;
     Fl_Value_Input *vy = new Fl_Value_Input(px, vyy, pw, 22, "Y:"); vyy += 28;
     Fl_Value_Input *vz = new Fl_Value_Input(px, vyy, pw, 22, "Z:"); vyy += 28;
+    vx->range(-10000, 10000); vy->range(-10000, 10000); vz->range(-10000, 10000);
     vx->step(0.01); vy->step(0.01); vz->step(0.01);
     vx->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);   /* live while sliding/typing */
     vy->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
