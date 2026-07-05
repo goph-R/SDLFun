@@ -11,6 +11,7 @@ static void conLogf(const char *fmt, ...)
 { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); }
 
 #include "edit_mesh.h"
+#include "edit_ops.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { \
@@ -70,6 +71,36 @@ int main(void)
         editMeshCompact(&m, kv, kf);
         CHECK(m.numVerts == 8);                     /* the 4 orphans are gone */
         CHECK(m.numFaces == 6);
+        editMeshFree(&m);
+    }
+
+    /* extrude a single face (the +Y top, index 4): +4 verts, +4 side walls */
+    {
+        EditMesh m; freshCube(&m);
+        unsigned char sf[6];
+        int i; for (i = 0; i < 6; i++) sf[i] = 0;
+        sf[4] = 1;                                  /* top face */
+        int n = editExtrude(&m, sf);
+        CHECK(n == 1);
+        CHECK(m.numVerts == 12);                    /* 4 cap verts duplicated */
+        CHECK(m.numFaces == 10);                    /* 6 + 4 boundary walls */
+        CHECK(m.faces[4].v[0] >= 8);                /* cap rewired to new verts */
+        /* not moved yet -> cap normal still +Y */
+        CHECK(m.faces[4].normal.y > 0.9f);
+        editMeshFree(&m);
+    }
+
+    /* extrude two adjacent faces (+Y top #4 and +X #2): their shared edge is
+       interior (no wall), so 6 boundary walls + 6 duplicated verts */
+    {
+        EditMesh m; freshCube(&m);
+        unsigned char sf[6];
+        int i; for (i = 0; i < 6; i++) sf[i] = 0;
+        sf[4] = 1; sf[2] = 1;
+        int n = editExtrude(&m, sf);
+        CHECK(n == 2);
+        CHECK(m.numVerts == 14);                    /* union of 2 quads = 6 verts */
+        CHECK(m.numFaces == 12);                    /* 6 + 6 walls (1 shared edge) */
         editMeshFree(&m);
     }
 

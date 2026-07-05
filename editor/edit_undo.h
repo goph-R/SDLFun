@@ -105,4 +105,14 @@ static int editHistoryRedo(EditHistory *h, EditMesh *mesh)
     return 1;
 }
 
+/* Restore the top undo snapshot into `mesh` and discard it, with NO redo entry.
+   Used to abort an in-progress op (e.g. cancel an extrude+move as one step). */
+static int editHistoryPopRestore(EditHistory *h, EditMesh *mesh)
+{
+    if (h->nUndo == 0) return 0;
+    editMeshFree(mesh);
+    *mesh = h->undo[--h->nUndo];
+    return 1;
+}
+
 #endif /* EDIT_UNDO_H */

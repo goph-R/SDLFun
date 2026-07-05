@@ -26,11 +26,12 @@
  *     ./soob_editor [level.obj] [level.ent]
  * defaults to assets/levels/test_level.{obj,ent}.
  *
- * Controls: right-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
+ * Controls: right-drag = look, WASD = move, PgUp/PgDn = up/down, wheel = dolly,
  * left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face,
  * G = grab/move (X/Y/Z axis-lock, click/Enter confirm, Esc cancel),
- * F = make face (3-4 verts), X/Del = delete, Ctrl+Z / Ctrl+Y = undo / redo.
- * Menus: Add (Cube/Plane), Mesh (Make Face / Flip Normals / Delete).
+ * E = extrude faces, F = make face (3-4 verts), X/Del = delete,
+ * Ctrl+Z / Ctrl+Y = undo / redo.
+ * Menus: Add (Cube/Plane), Mesh (Extrude / Make Face / Flip Normals / Delete).
  */
 
 #ifdef _WIN32
@@ -93,6 +94,7 @@ static void conLogf(const char *fmt, ...)
 #include "edit_select.h"     /* vert/edge/face selection state                       */
 #include "edit_pick.h"       /* screen-space + ray picking (no GLU)                  */
 #include "edit_undo.h"       /* whole-mesh snapshot undo/redo                        */
+#include "edit_ops.h"        /* extrude                                              */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -139,6 +141,7 @@ public:
     Vec3  grabCentroid;
     int  *grabVerts; Vec3 *grabOrig; int nGrab;
     int   suppressRelease;      /* skip the select on a grab-confirm click */
+    int   grabFromExtrude;      /* grab launched by extrude (cancel = full undo) */
 
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
@@ -154,7 +157,7 @@ public:
           menuBar(0), undoIdx(-1), redoIdx(-1),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
-          grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0),
+          grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
@@ -419,8 +422,9 @@ public:
         if (Fl::get_key('s')) { camX -= fx*speed; camY -= fy*speed; camZ -= fz*speed; moved = 1; }
         if (Fl::get_key('d')) { camX += rx*speed; camZ += rz*speed; moved = 1; }
         if (Fl::get_key('a')) { camX -= rx*speed; camZ -= rz*speed; moved = 1; }
-        if (Fl::get_key('e')) { camY += speed; moved = 1; }
-        if (Fl::get_key('q')) { camY -= speed; moved = 1; }
+        /* PgUp/PgDn raise/lower (Q/E freed — E is now extrude). */
+        if (Fl::get_key(FL_Page_Up))   { camY += speed; moved = 1; }
+        if (Fl::get_key(FL_Page_Down)) { camY -= speed; moved = 1; }
         return moved;
     }
 
@@ -526,7 +530,18 @@ public:
     {
         free(grabVerts); free(grabOrig);
         grabVerts = NULL; grabOrig = NULL;
-        nGrab = 0; grabbing = 0; grabAxis = -1;
+        nGrab = 0; grabbing = 0; grabAxis = -1; grabFromExtrude = 0;
+    }
+
+    /* Anchor to the mouse and arm the modal move. The caller must have already
+       gathered the verts (grabGather) and pushed any undo snapshot. */
+    void grabBeginCommon()
+    {
+        grabAxis = -1;
+        grabAnchorX = grabCurX = Fl::event_x();
+        grabAnchorY = grabCurY = Fl::event_y();
+        grabbing = 1;
+        updateMenuEnabled();
     }
 
     void grabStart()
@@ -534,11 +549,8 @@ public:
         if (grabbing || !haveEmesh) return;
         if (grabGather() == 0) { conLogf("grab: nothing selected\n"); return; }
         editHistoryPush(&hist, &emesh);          /* pre-grab restore point */
-        grabAxis = -1;
-        grabAnchorX = grabCurX = Fl::event_x();
-        grabAnchorY = grabCurY = Fl::event_y();
-        grabbing = 1;
-        updateMenuEnabled();                 /* push added an undo, cleared redo */
+        grabFromExtrude = 0;
+        grabBeginCommon();
         conLogf("grab: %d vert(s)\n", nGrab);
     }
 
@@ -575,6 +587,13 @@ public:
 
     void grabCancel()
     {
+        if (grabFromExtrude) {
+            /* undo the whole extrude+move as one step (removes the new geometry) */
+            editHistoryPopRestore(&hist, &emesh);
+            grabEnd();
+            afterTopologyEdit();
+            return;
+        }
         for (int k = 0; k < nGrab; k++)
             emesh.verts[grabVerts[k]].pos = grabOrig[k];
         editMeshBuild(&emesh, &eobj);
@@ -769,6 +788,48 @@ public:
         conLogf("add plane at %.2f %.2f %.2f\n", c.x, c.y, c.z);
     }
 
+    /* E: extrude the selected faces, then auto-grab the new cap so you drag it
+       out to height (locked to the face's axis when it's axis-aligned). One
+       undo step covers extrude+move; Esc removes the whole extrusion. */
+    void extrudeSelection()
+    {
+        if (grabbing || !haveEmesh) return;
+        int nf = emesh.numFaces, i, nsel = 0;
+        for (i = 0; i < nf; i++) if (sel.faceSel[i]) nsel++;
+        if (nsel == 0) { conLogf("extrude: select faces (mode 3) first\n"); return; }
+
+        editHistoryPush(&hist, &emesh);          /* one snapshot for extrude+move */
+
+        unsigned char *cap = (unsigned char *)malloc(nf);
+        for (i = 0; i < nf; i++) cap[i] = sel.faceSel[i];
+
+        editExtrude(&emesh, cap);                /* cap faces keep their indices */
+
+        Vec3 avg = editV3(0, 0, 0);              /* dominant axis of the cap */
+        for (i = 0; i < nf; i++) if (cap[i]) avg = editV3Add(avg, emesh.faces[i].normal);
+        avg = editV3Norm(avg);
+
+        editMeshBuild(&emesh, &eobj);
+        editSelFree(&sel);
+        editSelInit(&sel, &emesh);
+        for (i = 0; i < nf; i++) if (cap[i]) sel.faceSel[i] = 1;   /* reselect cap */
+        applyMode(SEL_FACE);
+        free(cap);
+
+        grabFromExtrude = 1;
+        if (grabGather() > 0) {
+            grabBeginCommon();
+            if      (fabsf(avg.x) > 0.9f) grabAxis = 0;   /* lock to the face axis */
+            else if (fabsf(avg.y) > 0.9f) grabAxis = 1;
+            else if (fabsf(avg.z) > 0.9f) grabAxis = 2;
+            else                          grabAxis = -1;
+        } else {
+            grabFromExtrude = 0;
+        }
+        redraw();
+        conLogf("extrude: %d face(s)\n", nsel);
+    }
+
     int handle(int e)
     {
         switch (e) {
@@ -859,6 +920,7 @@ public:
             if (k == '3') { applyMode(SEL_FACE); return 1; }
             if (k == 'g' || k == 'G') { grabStart(); return 1; }
             if (k == 'f' || k == 'F') { makeFace(); return 1; }
+            if (k == 'e' || k == 'E') { extrudeSelection(); return 1; }
             if (k == 'x' || k == 'X' || k == FL_Delete) { deleteSelected(); return 1; }
             if ((st & FL_CTRL) && (k == 'z' || k == 'Z')) { doUndo(); return 1; }
             if ((st & FL_CTRL) && (k == 'y' || k == 'Y')) { doRedo(); return 1; }
@@ -902,6 +964,7 @@ static void menuExitCb(Fl_Widget *, void *v) { if (confirmExit()) ((Fl_Window *)
 static void winCloseCb(Fl_Widget *w, void *) { if (confirmExit()) w->hide(); }
 static void menuUndoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doUndo(); }
 static void menuRedoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doRedo(); }
+static void menuExtrudeCb (Fl_Widget *, void *v) { ((EditorView *)v)->extrudeSelection(); }
 static void menuAddCubeCb (Fl_Widget *, void *v) { ((EditorView *)v)->addCube(); }
 static void menuAddPlaneCb(Fl_Widget *, void *v) { ((EditorView *)v)->addPlane(); }
 static void menuMakeFaceCb(Fl_Widget *, void *v) { ((EditorView *)v)->makeFace(); }
@@ -976,16 +1039,17 @@ int main(int argc, char **argv)
 
     menu->add("Add/Cube",          0,         menuAddCubeCb,  view);
     menu->add("Add/Plane",         0,         menuAddPlaneCb, view);
+    menu->add("Mesh/Extrude",      'e',       menuExtrudeCb,  view);
     menu->add("Mesh/Make Face",    'f',       menuMakeFaceCb, view);
     menu->add("Mesh/Flip Normals", 0,         menuFlipCb,     view);
     menu->add("Mesh/Delete",       FL_Delete, menuDeleteCb,   view);
 
     win->callback(winCloseCb);             /* confirm on the window close button too */
 
-    conLogf("SOOB Level Editor — right-drag look, WASD move, Q/E down/up, wheel dolly\n");
+    conLogf("SOOB Level Editor — right-drag look, WASD move, PgUp/PgDn up/down, wheel dolly\n");
     conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
     conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
-    conLogf("  F = make face (3-4 verts), X/Del = delete; Add & Mesh menus = primitives / flip\n");
+    conLogf("  E = extrude, F = make face (3-4 verts), X/Del = delete; Add & Mesh menus\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);

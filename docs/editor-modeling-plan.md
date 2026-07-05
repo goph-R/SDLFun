@@ -119,10 +119,10 @@ polish-tail.
 | **M1** | Selection + overlay + picking: click verts/edges/faces, they highlight; modes 1/2/3. | **done** |
 | **M2** | **Grab** with axis-lock + live 1 cm snap; **snapshot undo**. | **done** |
 | **M3** | **Make-face (F)**, flip, delete, **Add Cube/Plane** seeds. | **done** |
-| M4 | **Extrude** + merge-by-distance + recalc-normals. *The core verb.* | |
-| M5 | Materials panel: per-face assign + tiling spinners, live. | |
+| **M4** | **Extrude** *(the core verb)* — select faces, push out, auto-grab. | **done** |
+| **M5** | Materials panel: per-face assign + tiling spinners, live. | **in progress** |
 | M6 | `.lvl` save/load + OBJ/MTL export; round-trip a Blender bake. | |
-| polish | Gizmos, box-select, loop-select, numeric entry, snap toggle. | |
+| polish | Merge-by-distance, recalc-normals, gizmos, box-select, loop-select, numeric entry, snap toggle. | |
 
 ## Spine
 
