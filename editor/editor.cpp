@@ -146,7 +146,8 @@ public:
     Fl_Input       *diffuseInput;
     Fl_Value_Input *scaleInput, *offXInput, *offYInput;
     Fl_Value_Input *vxInput, *vyInput, *vzInput;
-    int             panelVert;   /* the vertex the X/Y/Z fields edit, or -1 */
+    int             panelVert;       /* the vertex the X/Y/Z fields edit, or -1 */
+    int             vertEditPushed;  /* one undo push per vertex-edit gesture */
 
     /* M2 grab (modal move): active while `grabbing`. The affected verts and
        their pre-grab positions are captured at start; the mouse delta
@@ -172,7 +173,7 @@ public:
           menuBar(0), undoIdx(-1), redoIdx(-1),
           propPanel(0), faceGroup(0), vertGroup(0),
           matChoice(0), diffuseInput(0), scaleInput(0), offXInput(0), offYInput(0),
-          vxInput(0), vyInput(0), vzInput(0), panelVert(-1),
+          vxInput(0), vyInput(0), vzInput(0), panelVert(-1), vertEditPushed(0),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
@@ -906,6 +907,7 @@ public:
     void refreshVertPanel(int vi)
     {
         panelVert = vi;
+        vertEditPushed = 0;              /* next edit starts a new undo gesture */
         vxInput->value(emesh.verts[vi].pos.x);
         vyInput->value(emesh.verts[vi].pos.y);
         vzInput->value(emesh.verts[vi].pos.z);
@@ -940,7 +942,8 @@ public:
     void onVertPosChanged()
     {
         if (panelVert < 0 || panelVert >= emesh.numVerts) return;
-        editHistoryPush(&hist, &emesh);
+        /* Push undo once per gesture, so a live slide doesn't spam the stack. */
+        if (!vertEditPushed) { editHistoryPush(&hist, &emesh); vertEditPushed = 1; updateMenuEnabled(); }
         emesh.verts[panelVert].pos.x = editSnap((float)vxInput->value());
         emesh.verts[panelVert].pos.y = editSnap((float)vyInput->value());
         emesh.verts[panelVert].pos.z = editSnap((float)vzInput->value());
@@ -1243,6 +1246,9 @@ int main(int argc, char **argv)
     si->range(0.01, 64.0); si->step(0.05); si->value(1.0);
     ox->range(-64.0, 64.0); ox->step(0.05); ox->value(0.0);
     oy->range(-64.0, 64.0); oy->step(0.05); oy->value(0.0);
+    si->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);   /* live while sliding/typing */
+    ox->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    oy->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
     di->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
     faceGroup->end();
 
@@ -1253,9 +1259,9 @@ int main(int argc, char **argv)
     Fl_Value_Input *vy = new Fl_Value_Input(px, vyy, pw, 22, "Y:"); vyy += 28;
     Fl_Value_Input *vz = new Fl_Value_Input(px, vyy, pw, 22, "Z:"); vyy += 28;
     vx->step(0.01); vy->step(0.01); vz->step(0.01);
-    vx->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
-    vy->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
-    vz->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    vx->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);   /* live while sliding/typing */
+    vy->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    vz->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
     vertGroup->end();
 
     faceGroup->hide(); vertGroup->hide();        /* refreshPanel reveals one */
