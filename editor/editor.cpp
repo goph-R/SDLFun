@@ -29,7 +29,8 @@
  * Controls: right-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
  * left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face,
  * G = grab/move (X/Y/Z axis-lock, click/Enter confirm, Esc cancel),
- * Ctrl+Z / Ctrl+Y = undo / redo.
+ * F = make face (3-4 verts), X/Del = delete, Ctrl+Z / Ctrl+Y = undo / redo.
+ * Menus: Add (Cube/Plane), Mesh (Make Face / Flip Normals / Delete).
  */
 
 #ifdef _WIN32
@@ -612,6 +613,162 @@ public:
     void doUndo() { if (!grabbing && editHistoryUndo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
     void doRedo() { if (!grabbing && editHistoryRedo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
 
+    /* ---- M3: make-face / flip / delete / add-primitive ------------------ */
+
+    /* World point ~5 m in front of the camera (snapped) — where new primitives
+       are dropped. */
+    Vec3 focusPoint()
+    {
+        Camera cam; computeCamera(&cam);
+        Vec3 fwd = editV3Norm(editV3Sub(cam.at, cam.eye));
+        Vec3 p = editV3Add(cam.eye, editV3Scale(fwd, 5.0f));
+        return editV3(editSnap(p.x), editSnap(p.y), editSnap(p.z));
+    }
+
+    /* Rebuild the render mesh, reset the selection (topology changed), and
+       refresh the Undo/Redo menu state. */
+    void afterTopologyEdit()
+    {
+        editMeshBuild(&emesh, &eobj);
+        EditSelMode prev = sel.mode;
+        editSelFree(&sel);
+        editSelInit(&sel, &emesh);
+        applyMode(prev);
+        updateMenuEnabled();
+        redraw();
+    }
+
+    /* F: make a face from 3 or 4 selected verts, ordered around their centroid
+       on the best-fit plane so a quad doesn't come out as a bowtie. */
+    void makeFace()
+    {
+        if (grabbing || !haveEmesh) return;
+        int idx[4], n = 0, total = 0, i;
+        for (i = 0; i < emesh.numVerts; i++)
+            if (sel.vertSel[i]) { if (n < 4) idx[n++] = i; total++; }
+        if (total < 3 || total > 4) { conLogf("make face: select 3 or 4 vertices\n"); return; }
+
+        Vec3 c = editV3(0, 0, 0);
+        for (i = 0; i < total; i++) c = editV3Add(c, emesh.verts[idx[i]].pos);
+        c = editV3Scale(c, 1.0f / (float)total);
+
+        Vec3 nrm = editV3(0, 0, 0);                 /* Newell normal */
+        for (i = 0; i < total; i++) {
+            Vec3 a = emesh.verts[idx[i]].pos;
+            Vec3 b = emesh.verts[idx[(i + 1) % total]].pos;
+            nrm.x += (a.y - b.y) * (a.z + b.z);
+            nrm.y += (a.z - b.z) * (a.x + b.x);
+            nrm.z += (a.x - b.x) * (a.y + b.y);
+        }
+        nrm = editV3Norm(nrm);
+        Vec3 ref = (fabsf(nrm.y) < 0.9f) ? editV3(0, 1, 0) : editV3(1, 0, 0);
+        Vec3 u = editV3Norm(editV3Cross(ref, nrm));
+        Vec3 v = editV3Cross(nrm, u);
+        float ang[4];
+        for (i = 0; i < total; i++) {
+            Vec3 d = editV3Sub(emesh.verts[idx[i]].pos, c);
+            ang[i] = atan2f(editV3Dot(d, v), editV3Dot(d, u));
+        }
+        for (int a = 0; a < total - 1; a++)         /* bubble sort by angle */
+            for (int b = 0; b < total - 1 - a; b++)
+                if (ang[b] > ang[b + 1]) {
+                    float t = ang[b]; ang[b] = ang[b + 1]; ang[b + 1] = t;
+                    int ti = idx[b]; idx[b] = idx[b + 1]; idx[b + 1] = ti;
+                }
+
+        editHistoryPush(&hist, &emesh);
+        editAddFace(&emesh, idx[0], idx[1], idx[2], total == 4 ? idx[3] : -1,
+                    emesh.numMats > 0 ? 0 : -1);
+        afterTopologyEdit();
+        conLogf("make face: %d verts\n", total);
+    }
+
+    /* Flip the winding/normal of the selected faces (topology unchanged, so the
+       selection survives). */
+    void flipSelected()
+    {
+        if (grabbing || !haveEmesh) return;
+        int n = 0, i;
+        for (i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) n++;
+        if (n == 0) { conLogf("flip: select faces (mode 3) first\n"); return; }
+        editHistoryPush(&hist, &emesh);
+        for (i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) editFlipFace(&emesh, i);
+        editMeshBuild(&emesh, &eobj);
+        updateMenuEnabled();
+        redraw();
+        conLogf("flip: %d face(s)\n", n);
+    }
+
+    /* Delete the selection: in vertex mode the selected verts and every face
+       using them; in face/edge mode the selected faces (or faces on a selected
+       edge) plus any verts orphaned by the removal. */
+    void deleteSelected()
+    {
+        if (grabbing || !haveEmesh) return;
+        int nv = emesh.numVerts, nf = emesh.numFaces, i, j;
+        unsigned char *keepV = (unsigned char *)malloc(nv > 0 ? nv : 1);
+        unsigned char *keepF = (unsigned char *)malloc(nf > 0 ? nf : 1);
+        for (i = 0; i < nv; i++) keepV[i] = 1;
+        for (i = 0; i < nf; i++) keepF[i] = 1;
+        int any = 0;
+
+        if (sel.mode == SEL_VERT) {
+            for (i = 0; i < nv; i++) if (sel.vertSel[i]) { keepV[i] = 0; any = 1; }
+            for (i = 0; i < nf; i++)
+                for (j = 0; j < emesh.faces[i].nv; j++)
+                    if (!keepV[emesh.faces[i].v[j]]) { keepF[i] = 0; break; }
+        } else if (sel.mode == SEL_FACE) {
+            for (i = 0; i < nf; i++) if (sel.faceSel[i]) { keepF[i] = 0; any = 1; }
+        } else { /* SEL_EDGE: drop faces that contain a whole selected edge */
+            for (i = 0; i < nf; i++) {
+                EditFace *f = &emesh.faces[i];
+                for (int e = 0; e < sel.numEdges && keepF[i]; e++) {
+                    if (!sel.edgeSel[e]) continue;
+                    int a = sel.edges[e].a, b = sel.edges[e].b, hasA = 0, hasB = 0;
+                    for (j = 0; j < f->nv; j++) { if (f->v[j] == a) hasA = 1; if (f->v[j] == b) hasB = 1; }
+                    if (hasA && hasB) { keepF[i] = 0; any = 1; }
+                }
+            }
+        }
+        if (!any) { free(keepV); free(keepF); conLogf("delete: nothing selected\n"); return; }
+
+        if (sel.mode != SEL_VERT) {                 /* drop verts no face uses */
+            for (i = 0; i < nv; i++) keepV[i] = 0;
+            for (i = 0; i < nf; i++)
+                if (keepF[i]) for (j = 0; j < emesh.faces[i].nv; j++)
+                    keepV[emesh.faces[i].v[j]] = 1;
+        }
+
+        editHistoryPush(&hist, &emesh);
+        editMeshCompact(&emesh, keepV, keepF);
+        free(keepV); free(keepF);
+        afterTopologyEdit();
+        conLogf("delete: -> %d verts, %d faces\n", emesh.numVerts, emesh.numFaces);
+    }
+
+    void addCube()
+    {
+        if (grabbing || !haveEmesh) return;
+        editHistoryPush(&hist, &emesh);
+        Vec3 c = focusPoint();
+        editAddCube(&emesh, c.x, c.y, c.z, 1.0f, 1.0f, 1.0f, emesh.numMats > 0 ? 0 : -1);
+        afterTopologyEdit();
+        conLogf("add cube at %.2f %.2f %.2f\n", c.x, c.y, c.z);
+    }
+
+    void addPlane()
+    {
+        if (grabbing || !haveEmesh) return;
+        editHistoryPush(&hist, &emesh);
+        Vec3 c = focusPoint();
+        float h = 1.0f;
+        int matId = emesh.numMats > 0 ? 0 : -1;
+        editAddQuad(&emesh, editV3(c.x - h, c.y, c.z - h), editV3(c.x - h, c.y, c.z + h),
+                            editV3(c.x + h, c.y, c.z + h), editV3(c.x + h, c.y, c.z - h), matId);
+        afterTopologyEdit();
+        conLogf("add plane at %.2f %.2f %.2f\n", c.x, c.y, c.z);
+    }
+
     int handle(int e)
     {
         switch (e) {
@@ -701,6 +858,8 @@ public:
             if (k == '2') { applyMode(SEL_EDGE); return 1; }
             if (k == '3') { applyMode(SEL_FACE); return 1; }
             if (k == 'g' || k == 'G') { grabStart(); return 1; }
+            if (k == 'f' || k == 'F') { makeFace(); return 1; }
+            if (k == 'x' || k == 'X' || k == FL_Delete) { deleteSelected(); return 1; }
             if ((st & FL_CTRL) && (k == 'z' || k == 'Z')) { doUndo(); return 1; }
             if ((st & FL_CTRL) && (k == 'y' || k == 'Y')) { doRedo(); return 1; }
             return 1;
@@ -743,6 +902,11 @@ static void menuExitCb(Fl_Widget *, void *v) { if (confirmExit()) ((Fl_Window *)
 static void winCloseCb(Fl_Widget *w, void *) { if (confirmExit()) w->hide(); }
 static void menuUndoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doUndo(); }
 static void menuRedoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doRedo(); }
+static void menuAddCubeCb (Fl_Widget *, void *v) { ((EditorView *)v)->addCube(); }
+static void menuAddPlaneCb(Fl_Widget *, void *v) { ((EditorView *)v)->addPlane(); }
+static void menuMakeFaceCb(Fl_Widget *, void *v) { ((EditorView *)v)->makeFace(); }
+static void menuFlipCb    (Fl_Widget *, void *v) { ((EditorView *)v)->flipSelected(); }
+static void menuDeleteCb  (Fl_Widget *, void *v) { ((EditorView *)v)->deleteSelected(); }
 
 int main(int argc, char **argv)
 {
@@ -810,11 +974,18 @@ int main(int argc, char **argv)
     view->redoIdx = menu->add("Edit/Redo", FL_COMMAND + 'y', menuRedoCb, view);
     view->updateMenuEnabled();             /* both start greyed (empty stacks) */
 
+    menu->add("Add/Cube",          0,         menuAddCubeCb,  view);
+    menu->add("Add/Plane",         0,         menuAddPlaneCb, view);
+    menu->add("Mesh/Make Face",    'f',       menuMakeFaceCb, view);
+    menu->add("Mesh/Flip Normals", 0,         menuFlipCb,     view);
+    menu->add("Mesh/Delete",       FL_Delete, menuDeleteCb,   view);
+
     win->callback(winCloseCb);             /* confirm on the window close button too */
 
     conLogf("SOOB Level Editor — right-drag look, WASD move, Q/E down/up, wheel dolly\n");
     conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
     conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
+    conLogf("  F = make face (3-4 verts), X/Del = delete; Add & Mesh menus = primitives / flip\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);

@@ -163,4 +163,32 @@ static void editAddQuad(EditMesh *m, Vec3 a, Vec3 b, Vec3 c, Vec3 d, int matId)
     editAddFace(m, i0, i1, i2, i3, matId);
 }
 
+/* Compact the mesh in place, keeping verts flagged in keepVert[] and faces
+   flagged in keepFace[] whose verts all survive; face indices are remapped to
+   the new compacted vertex numbering. (Used by delete.) */
+static void editMeshCompact(EditMesh *m, const unsigned char *keepVert,
+                            const unsigned char *keepFace)
+{
+    int *map = (int *)malloc((m->numVerts > 0 ? m->numVerts : 1) * sizeof(int));
+    int nv = 0, nf = 0, i, j;
+
+    for (i = 0; i < m->numVerts; i++) {
+        if (keepVert[i]) { map[i] = nv; m->verts[nv] = m->verts[i]; nv++; }
+        else             { map[i] = -1; }
+    }
+    for (i = 0; i < m->numFaces; i++) {
+        if (!keepFace[i]) continue;
+        EditFace f = m->faces[i];
+        int ok = 1;
+        for (j = 0; j < f.nv; j++) {
+            if (map[f.v[j]] < 0) { ok = 0; break; }   /* a vert was removed */
+            f.v[j] = map[f.v[j]];
+        }
+        if (ok) m->faces[nf++] = f;
+    }
+    m->numVerts = nv;
+    m->numFaces = nf;
+    free(map);
+}
+
 #endif /* EDIT_MESH_H */
