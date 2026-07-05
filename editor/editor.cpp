@@ -26,7 +26,8 @@
  *     ./soob_editor [level.obj] [level.ent]
  * defaults to assets/levels/test_level.{obj,ent}.
  *
- * Controls: left-drag = look, WASD = move, Q/E = down/up, wheel = dolly.
+ * Controls: left-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
+ * click = select, Shift+click = add/toggle, 1/2/3 = vertex/edge/face mode.
  */
 
 #ifdef _WIN32
@@ -76,6 +77,8 @@ static void conLogf(const char *fmt, ...)
 #include "edit_assets.h"     /* minimal assets.lua -> AssetRegistry (models+textures) */
 #include "edit_mesh.h"       /* editor native mesh (verts/faces, 1 cm snap)          */
 #include "edit_mesh_build.h" /* EditMesh -> ObjMesh for the engine renderer          */
+#include "edit_select.h"     /* vert/edge/face selection state                       */
+#include "edit_pick.h"       /* screen-space + ray picking (no GLU)                  */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -104,6 +107,9 @@ public:
     ObjMesh       eobj;
     int           haveEmesh;
 
+    EditSelection sel;          /* M1: vert/edge/face selection */
+    int           pushX, pushY; /* mouse-down point, for click-vs-drag */
+
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
     float yaw, pitch;
@@ -113,7 +119,7 @@ public:
         : Fl_Gl_Window(X, Y, W, H),
           objPath("assets/levels/test_level.obj"),
           entPath("assets/levels/test_level.ent"),
-          loaded(0), bootstrapped(0), haveEmesh(0),
+          loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
@@ -180,9 +186,10 @@ public:
             editAddCube(&emesh, 0.0f, 1.0f, -4.0f, 2.0f, 2.0f, 2.0f, 0);
             objInit(&eobj);
             editMeshBuild(&emesh, &eobj);
+            editSelInit(&sel, &emesh);   /* M1: selection + derived edge list */
             haveEmesh = (loaded != 0);   /* renderer needs scene.texCache valid */
-            conLogf("editor: demo cube built (%d tris, %d sectors)\n",
-                    eobj.numTris, eobj.numSectors);
+            conLogf("editor: demo cube built (%d tris, %d sectors, %d edges)\n",
+                    eobj.numTris, eobj.numSectors, sel.numEdges);
 
             bootstrapped = 1;
         }
@@ -216,9 +223,102 @@ public:
         if (haveEmesh) {
             glEnable(GL_LIGHTING);
             renderLevelSectored(&eobj, &scene.texCache);
+            drawSelectionOverlay();
         }
 
         drawOverlay();
+    }
+
+    /* M1: draw the edit-mesh wireframe + the current selection. Base wireframe
+       and unselected verts are depth-tested (occlude naturally); the selection
+       highlight is drawn depth-test-off so it always reads clearly. Colours:
+       dark wire, orange (1.0, 0.6, 0.1) selection. */
+    void drawSelectionOverlay()
+    {
+        glDisable(GL_LIGHTING);
+        glDisable(GL_TEXTURE_2D);
+
+        /* All edges, thin + dark. */
+        glLineWidth(1.0f);
+        glColor3f(0.05f, 0.05f, 0.05f);
+        glBegin(GL_LINES);
+        for (int i = 0; i < sel.numEdges; i++) {
+            Vec3 *a = &emesh.verts[sel.edges[i].a].pos;
+            Vec3 *b = &emesh.verts[sel.edges[i].b].pos;
+            glVertex3f(a->x, a->y, a->z);
+            glVertex3f(b->x, b->y, b->z);
+        }
+        glEnd();
+
+        /* Unselected verts (vertex mode only), depth-tested. */
+        if (sel.mode == SEL_VERT) {
+            glPointSize(4.0f);
+            glColor3f(0.1f, 0.1f, 0.1f);
+            glBegin(GL_POINTS);
+            for (int i = 0; i < emesh.numVerts; i++) {
+                if (sel.vertSel[i]) continue;
+                Vec3 *p = &emesh.verts[i].pos;
+                glVertex3f(p->x, p->y, p->z);
+            }
+            glEnd();
+        }
+
+        /* Selection highlight — always visible (no depth test). */
+        glDisable(GL_DEPTH_TEST);
+
+        if (sel.mode == SEL_FACE) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDisable(GL_CULL_FACE);
+            glColor4f(1.0f, 0.6f, 0.1f, 0.4f);
+            glBegin(GL_TRIANGLES);
+            for (int i = 0; i < emesh.numFaces; i++) {
+                if (!sel.faceSel[i]) continue;
+                EditFace *f = &emesh.faces[i];
+                Vec3 *v0 = &emesh.verts[f->v[0]].pos;
+                Vec3 *v1 = &emesh.verts[f->v[1]].pos;
+                Vec3 *v2 = &emesh.verts[f->v[2]].pos;
+                glVertex3f(v0->x, v0->y, v0->z);
+                glVertex3f(v1->x, v1->y, v1->z);
+                glVertex3f(v2->x, v2->y, v2->z);
+                if (f->nv == 4) {
+                    Vec3 *v3 = &emesh.verts[f->v[3]].pos;
+                    glVertex3f(v0->x, v0->y, v0->z);
+                    glVertex3f(v2->x, v2->y, v2->z);
+                    glVertex3f(v3->x, v3->y, v3->z);
+                }
+            }
+            glEnd();
+            glEnable(GL_CULL_FACE);
+            glDisable(GL_BLEND);
+        } else if (sel.mode == SEL_EDGE) {
+            glLineWidth(3.0f);
+            glColor3f(1.0f, 0.6f, 0.1f);
+            glBegin(GL_LINES);
+            for (int i = 0; i < sel.numEdges; i++) {
+                if (!sel.edgeSel[i]) continue;
+                Vec3 *a = &emesh.verts[sel.edges[i].a].pos;
+                Vec3 *b = &emesh.verts[sel.edges[i].b].pos;
+                glVertex3f(a->x, a->y, a->z);
+                glVertex3f(b->x, b->y, b->z);
+            }
+            glEnd();
+            glLineWidth(1.0f);
+        } else { /* SEL_VERT */
+            glPointSize(8.0f);
+            glColor3f(1.0f, 0.6f, 0.1f);
+            glBegin(GL_POINTS);
+            for (int i = 0; i < emesh.numVerts; i++) {
+                if (!sel.vertSel[i]) continue;
+                Vec3 *p = &emesh.verts[i].pos;
+                glVertex3f(p->x, p->y, p->z);
+            }
+            glEnd();
+            glPointSize(1.0f);
+        }
+
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_LIGHTING);
     }
 
     /* Editor-only chrome — never touches the engine renderer. Drawn in world
@@ -284,14 +384,66 @@ public:
         return moved;
     }
 
+    /* Fill a PickCam from the current free-fly camera + viewport, matching the
+       70° vertical FOV that draw()'s glSetPerspective uses. */
+    void buildPickCam(PickCam *pc)
+    {
+        Camera cam;
+        computeCamera(&cam);
+        Vec3 fwd   = editV3Norm(editV3Sub(cam.at, cam.eye));
+        Vec3 right = editV3Norm(editV3Cross(fwd, editV3(0.0f, 1.0f, 0.0f)));
+        Vec3 up    = editV3Cross(right, fwd);
+        pc->eye = cam.eye; pc->forward = fwd; pc->right = right; pc->up = up;
+        pc->tanHalfFov = tanf((70.0f * 3.14159265f / 180.0f) * 0.5f);
+        int pw = w() > 0 ? w() : 1;
+        int ph = h() > 0 ? h() : 1;
+        pc->aspect = (float)pw / (float)ph;
+        pc->vpW = pw; pc->vpH = ph;
+    }
+
+    /* Pick at viewport-local (mx,my) in the active mode. additive (Shift)
+       toggles the hit element and keeps the rest; a plain click replaces the
+       selection (and clears it on a miss). */
+    void doPick(float mx, float my, int additive)
+    {
+        PickCam pc;
+        buildPickCam(&pc);
+        if (sel.mode == SEL_VERT) {
+            int idx = editPickVertex(&pc, &emesh, mx, my, 8.0f);
+            if (!additive) editSelClearActive(&sel);
+            if (idx >= 0) sel.vertSel[idx] = additive ? !sel.vertSel[idx] : 1;
+        } else if (sel.mode == SEL_EDGE) {
+            int idx = editPickEdge(&pc, &emesh, sel.edges, sel.numEdges, mx, my, 8.0f);
+            if (!additive) editSelClearActive(&sel);
+            if (idx >= 0) sel.edgeSel[idx] = additive ? !sel.edgeSel[idx] : 1;
+        } else {
+            int idx = editPickFace(&pc, &emesh, mx, my);
+            if (!additive) editSelClearActive(&sel);
+            if (idx >= 0) sel.faceSel[idx] = additive ? !sel.faceSel[idx] : 1;
+        }
+        redraw();
+    }
+
     int handle(int e)
     {
         switch (e) {
         case FL_PUSH:
-            lastX = Fl::event_x();
-            lastY = Fl::event_y();
+            lastX = pushX = Fl::event_x();
+            lastY = pushY = Fl::event_y();
             take_focus();
             return 1;
+        case FL_RELEASE: {
+            /* A press+release that barely moved is a click -> select. */
+            int dx = Fl::event_x() - pushX;
+            int dy = Fl::event_y() - pushY;
+            if (haveEmesh && dx * dx + dy * dy <= 16) {
+                int mx = Fl::event_x() - x();
+                int my = Fl::event_y() - y();
+                int add = (Fl::event_state() & FL_SHIFT) ? 1 : 0;
+                doPick((float)mx, (float)my, add);
+            }
+            return 1;
+        }
         case FL_DRAG: {
             int dx = Fl::event_x() - lastX;
             int dy = Fl::event_y() - lastY;
@@ -318,7 +470,15 @@ public:
         case FL_FOCUS:
         case FL_UNFOCUS:
             return 1;               /* keep receiving keyboard focus */
-        case FL_KEYDOWN:
+        case FL_KEYDOWN: {
+            /* 1/2/3 switch selection mode (Blender-style). WASD/QE movement is
+               polled by the frame timer, so it's untouched here. */
+            int k = Fl::event_key();
+            if (k == '1') { sel.mode = SEL_VERT; redraw(); return 1; }
+            if (k == '2') { sel.mode = SEL_EDGE; redraw(); return 1; }
+            if (k == '3') { sel.mode = SEL_FACE; redraw(); return 1; }
+            return 1;
+        }
         case FL_KEYUP:
             return 1;               /* movement handled by the frame timer */
         }
@@ -382,6 +542,7 @@ int main(int argc, char **argv)
     win->resizable(view);              /* only the viewport grows/shrinks */
 
     conLogf("SOOB Level Editor — left-drag look, WASD move, Q/E down/up, wheel dolly\n");
+    conLogf("  click = select, Shift+click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);
