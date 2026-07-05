@@ -1,7 +1,7 @@
 # Building FLTK for the SOOB Level Editor on Windows 98
 
-The SOOB level editor (`editor/editor.cpp`, built by `editor/build_editor.bat`)
-uses **FLTK** for its window + GL viewport. FLTK does not ship a Win98 binary, so you build it
+The SOOB level editor (`editor/editor.cpp`, built by `build_editor.bat` at the
+repo root) uses **FLTK** for its window + GL viewport. FLTK does not ship a Win98 binary, so you build it
 yourself, once, with the same Dev-C++ MinGW 3.4 toolchain the engine uses. This
 doc is that recipe.
 
@@ -106,13 +106,13 @@ and `-D*_FLAGS="-DWINVER=0x0500 -D_WIN32_WINNT=0x0500"`.)
 
 ## Then build the editor
 
-Run `build_editor.bat` from **inside the `editor\` folder** (where it lives).
-It sets `REPO=..` and routes every path through it — Win98-safe, since
-`command.com` has no `%~dp0`/`pushd` — so `FLTK` resolves to
-`..\vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced
-the libs yet. It compiles the local `editor.cpp` with `-DWIN32 -I%REPO%`
-(picking up the engine-root headers the editor includes by bare name) and
-writes `SoobEditor.exe` to the repo root. It links
+Run `build_editor.bat` from the **repo root** (where it lives), so you build and
+run `SoobEditor.exe` from the same folder. Its `FLTK` variable points at
+`vendor\fltk-1.3\FL`, and it errors early if `build_fltk.bat` hasn't produced the
+libs yet. It compiles `editor\editor.cpp` with `-DWIN32 -I. -I%FLTK%` (the `-I.`
+picks up the engine-root headers the editor includes by bare name; the editor's
+own `edit_*.h` resolve next to `editor.cpp`) and writes `SoobEditor.exe` to the
+repo root. It links
 `-lfltk_gl -lfltk` plus Bullet, Lua, and Win32 GL/GDI. No SDL, OpenAL, or
 vorbis — the `game.h` / `game_session.h` split keeps the script/UI/audio
 runtime out of the editor TU. Lua alone is linked, only so `edit_assets.h` can
