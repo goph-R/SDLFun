@@ -116,9 +116,9 @@ polish-tail.
 | M | Deliverable | Status |
 |---|---|---|
 | **M0** | `edit_mesh.h` + `edit_mesh_build.h`; a hardcoded snapped cube renders box-mapped through the engine path. | **done** |
-| **M1** | Selection + overlay + picking: click verts/edges/faces, they highlight; modes 1/2/3. | **in progress** |
-| M2 | **Grab** with axis-lock + live 1 cm snap; **snapshot undo**. | |
-| M3 | **Make-face (F)**, flip, delete, **Add Cube/Plane** seeds. | |
+| **M1** | Selection + overlay + picking: click verts/edges/faces, they highlight; modes 1/2/3. | **done** |
+| **M2** | **Grab** with axis-lock + live 1 cm snap; **snapshot undo**. | **done** |
+| **M3** | **Make-face (F)**, flip, delete, **Add Cube/Plane** seeds. | **in progress** |
 | M4 | **Extrude** + merge-by-distance + recalc-normals. *The core verb.* | |
 | M5 | Materials panel: per-face assign + tiling spinners, live. | |
 | M6 | `.lvl` save/load + OBJ/MTL export; round-trip a Blender bake. | |

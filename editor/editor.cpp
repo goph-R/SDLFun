@@ -27,7 +27,9 @@
  * defaults to assets/levels/test_level.{obj,ent}.
  *
  * Controls: right-drag = look, WASD = move, Q/E = down/up, wheel = dolly,
- * left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face.
+ * left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face,
+ * G = grab/move (X/Y/Z axis-lock, click/Enter confirm, Esc cancel),
+ * Ctrl+Z / Ctrl+Y = undo / redo.
  */
 
 #ifdef _WIN32
@@ -40,7 +42,9 @@
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Box.H>
+#include <FL/Fl_Menu_Bar.H>
 #include <FL/Fl_Pixmap.H>
+#include <FL/fl_ask.H>
 #include <FL/gl.h>
 
 #include <cstdio>
@@ -87,6 +91,7 @@ static void conLogf(const char *fmt, ...)
 #include "edit_mesh_build.h" /* EditMesh -> ObjMesh for the engine renderer          */
 #include "edit_select.h"     /* vert/edge/face selection state                       */
 #include "edit_pick.h"       /* screen-space + ray picking (no GLU)                  */
+#include "edit_undo.h"       /* whole-mesh snapshot undo/redo                        */
 
 /* GL proc loader for initMultitexture(). On Win98/MinGW the ARB multitexture
    entry points are resolved at runtime; on Linux they're linked directly and
@@ -121,6 +126,19 @@ public:
     /* Toolbar mode buttons (radio); kept in sync with sel.mode both ways. */
     Fl_Button    *bVert, *bEdge, *bFace;
 
+    EditHistory   hist;         /* M2: snapshot undo/redo */
+    Fl_Menu_Bar  *menuBar;      /* Edit menu, for greying out Undo/Redo */
+    int           undoIdx, redoIdx;
+
+    /* M2 grab (modal move): active while `grabbing`. The affected verts and
+       their pre-grab positions are captured at start; the mouse delta
+       (optionally axis-locked) moves them, snapped to 1 cm. */
+    int   grabbing, grabAxis;   /* grabAxis: -1 none, 0/1/2 = X/Y/Z */
+    int   grabAnchorX, grabAnchorY, grabCurX, grabCurY;
+    Vec3  grabCentroid;
+    int  *grabVerts; Vec3 *grabOrig; int nGrab;
+    int   suppressRelease;      /* skip the select on a grab-confirm click */
+
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
     float yaw, pitch;
@@ -132,10 +150,15 @@ public:
           entPath("assets/levels/test_level.ent"),
           loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
           bVert(0), bEdge(0), bFace(0),
+          menuBar(0), undoIdx(-1), redoIdx(-1),
+          grabbing(0), grabAxis(-1),
+          grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
+          grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
         mode(FL_RGB | FL_DEPTH | FL_DOUBLE);
+        editHistoryInit(&hist);
     }
 
     /* eye + look-at target from the free-fly camera state. */
@@ -452,15 +475,161 @@ public:
         redraw();
     }
 
+    /* ---- M2: modal grab (move) ------------------------------------------ */
+
+    Vec3 grabAxisVec()
+    {
+        return editV3(grabAxis == 0 ? 1.0f : 0.0f,
+                      grabAxis == 1 ? 1.0f : 0.0f,
+                      grabAxis == 2 ? 1.0f : 0.0f);
+    }
+
+    /* Collect the unique verts the current selection moves, with their pre-grab
+       positions + centroid. Returns the count (0 = nothing to grab). */
+    int grabGather()
+    {
+        int nV = emesh.numVerts;
+        unsigned char *mark = (unsigned char *)calloc(nV > 0 ? nV : 1, 1);
+        int i, j;
+        if (sel.mode == SEL_VERT) {
+            for (i = 0; i < nV; i++) if (sel.vertSel[i]) mark[i] = 1;
+        } else if (sel.mode == SEL_EDGE) {
+            for (i = 0; i < sel.numEdges; i++)
+                if (sel.edgeSel[i]) { mark[sel.edges[i].a] = 1; mark[sel.edges[i].b] = 1; }
+        } else {
+            for (i = 0; i < emesh.numFaces; i++)
+                if (sel.faceSel[i])
+                    for (j = 0; j < emesh.faces[i].nv; j++) mark[emesh.faces[i].v[j]] = 1;
+        }
+        int n = 0;
+        for (i = 0; i < nV; i++) if (mark[i]) n++;
+        if (n == 0) { free(mark); return 0; }
+
+        grabVerts = (int *)malloc(n * sizeof(int));
+        grabOrig  = (Vec3 *)malloc(n * sizeof(Vec3));
+        nGrab = 0;
+        Vec3 c = editV3(0, 0, 0);
+        for (i = 0; i < nV; i++) {
+            if (!mark[i]) continue;
+            grabVerts[nGrab] = i;
+            grabOrig[nGrab]  = emesh.verts[i].pos;
+            c = editV3Add(c, emesh.verts[i].pos);
+            nGrab++;
+        }
+        grabCentroid = editV3Scale(c, 1.0f / (float)nGrab);
+        free(mark);
+        return nGrab;
+    }
+
+    void grabEnd()
+    {
+        free(grabVerts); free(grabOrig);
+        grabVerts = NULL; grabOrig = NULL;
+        nGrab = 0; grabbing = 0; grabAxis = -1;
+    }
+
+    void grabStart()
+    {
+        if (grabbing || !haveEmesh) return;
+        if (grabGather() == 0) { conLogf("grab: nothing selected\n"); return; }
+        editHistoryPush(&hist, &emesh);          /* pre-grab restore point */
+        grabAxis = -1;
+        grabAnchorX = grabCurX = Fl::event_x();
+        grabAnchorY = grabCurY = Fl::event_y();
+        grabbing = 1;
+        updateMenuEnabled();                 /* push added an undo, cleared redo */
+        conLogf("grab: %d vert(s)\n", nGrab);
+    }
+
+    /* Recompute moved positions from originals + the current mouse delta. The
+       delta lives in the view plane through the selection centroid (screen
+       pixels -> world units at that depth); an axis lock projects onto X/Y/Z. */
+    void grabApply()
+    {
+        PickCam pc; buildPickCam(&pc);
+        float d = editDepth(&pc, grabCentroid);
+        if (d < 0.05f) d = 0.05f;
+        float wpp = (2.0f * d * pc.tanHalfFov) / (float)pc.vpH;
+        float dxp = (float)(grabCurX - grabAnchorX);
+        float dyp = (float)(grabCurY - grabAnchorY);
+        Vec3 delta = editV3Add(editV3Scale(pc.right, dxp * wpp),
+                               editV3Scale(pc.up,   -dyp * wpp));
+        if (grabAxis >= 0) {
+            Vec3 ax = grabAxisVec();
+            delta = editV3Scale(ax, editV3Dot(delta, ax));
+        }
+        for (int k = 0; k < nGrab; k++) {
+            Vec3 np = editV3Add(grabOrig[k], delta);
+            emesh.verts[grabVerts[k]].pos.x = editSnap(np.x);
+            emesh.verts[grabVerts[k]].pos.y = editSnap(np.y);
+            emesh.verts[grabVerts[k]].pos.z = editSnap(np.z);
+        }
+        editMeshBuild(&emesh, &eobj);
+        redraw();
+    }
+
+    void grabUpdate(int mx, int my) { grabCurX = mx; grabCurY = my; grabApply(); }
+
+    void grabConfirm() { grabEnd(); redraw(); }   /* snapshot already on the stack */
+
+    void grabCancel()
+    {
+        for (int k = 0; k < nGrab; k++)
+            emesh.verts[grabVerts[k]].pos = grabOrig[k];
+        editMeshBuild(&emesh, &eobj);
+        editHistoryDropUndoTop(&hist);            /* back to pre-grab: drop it */
+        grabEnd();
+        updateMenuEnabled();
+        redraw();
+    }
+
+    /* After an undo/redo restores the mesh: rebuild the render mesh, and only
+       re-init the selection if the vert/face counts changed (topology edit);
+       for a grab (counts stable) the selection stays valid. */
+    void afterRestore()
+    {
+        editMeshBuild(&emesh, &eobj);
+        if (sel.numVerts != emesh.numVerts || sel.numFaces != emesh.numFaces) {
+            EditSelMode prev = sel.mode;
+            editSelFree(&sel);
+            editSelInit(&sel, &emesh);
+            applyMode(prev);
+        }
+        redraw();
+    }
+
+    /* Grey out Edit/Undo or Edit/Redo when its stack is empty. */
+    void updateMenuEnabled()
+    {
+        if (!menuBar || undoIdx < 0 || redoIdx < 0) return;
+        Fl_Menu_Item *m = (Fl_Menu_Item *)menuBar->menu();
+        if (hist.nUndo > 0) m[undoIdx].activate(); else m[undoIdx].deactivate();
+        if (hist.nRedo > 0) m[redoIdx].activate(); else m[redoIdx].deactivate();
+    }
+
+    /* Undo/redo entry points shared by the Ctrl+Z/Y keys and the Edit menu.
+       Disabled mid-grab (finish or cancel the grab first). */
+    void doUndo() { if (!grabbing && editHistoryUndo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
+    void doRedo() { if (!grabbing && editHistoryRedo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
+
     int handle(int e)
     {
         switch (e) {
         case FL_PUSH:
+            if (grabbing) {
+                /* left = confirm the move, right = cancel it; swallow the
+                   matching release so it doesn't also select. */
+                if (Fl::event_button() == FL_LEFT_MOUSE)       grabConfirm();
+                else if (Fl::event_button() == FL_RIGHT_MOUSE) grabCancel();
+                suppressRelease = 1;
+                return 1;
+            }
             lastX = pushX = Fl::event_x();
             lastY = pushY = Fl::event_y();
             take_focus();
             return 1;
         case FL_RELEASE: {
+            if (suppressRelease) { suppressRelease = 0; return 1; }
             /* Left click (press+release that barely moved) = select. Right
                button is camera-only, so it never selects. */
             int dx = Fl::event_x() - pushX;
@@ -505,16 +674,35 @@ public:
             redraw();
             return 1;
         }
+        case FL_ENTER:
+            return 1;               /* claim belowmouse so FL_MOVE arrives */
+        case FL_MOVE:
+            if (grabbing) grabUpdate(Fl::event_x(), Fl::event_y());
+            return 1;
         case FL_FOCUS:
         case FL_UNFOCUS:
             return 1;               /* keep receiving keyboard focus */
         case FL_KEYDOWN: {
-            /* 1/2/3 switch selection mode (Blender-style). WASD/QE movement is
-               polled by the frame timer, so it's untouched here. */
-            int k = Fl::event_key();
+            int k  = Fl::event_key();
+            int st = Fl::event_state();
+            if (grabbing) {
+                /* axis locks toggle (press again to release); Enter confirms,
+                   Esc cancels. Everything else is swallowed mid-grab. */
+                if (k == 'x' || k == 'X') { grabAxis = (grabAxis == 0) ? -1 : 0; grabApply(); return 1; }
+                if (k == 'y' || k == 'Y') { grabAxis = (grabAxis == 1) ? -1 : 1; grabApply(); return 1; }
+                if (k == 'z' || k == 'Z') { grabAxis = (grabAxis == 2) ? -1 : 2; grabApply(); return 1; }
+                if (k == FL_Enter || k == FL_KP_Enter) { grabConfirm(); return 1; }
+                if (k == FL_Escape) { grabCancel(); return 1; }
+                return 1;
+            }
+            /* 1/2/3 select mode; G grab; Ctrl+Z / Ctrl+Y undo/redo. WASD/QE
+               movement is polled by the frame timer, so it's untouched here. */
             if (k == '1') { applyMode(SEL_VERT); return 1; }
             if (k == '2') { applyMode(SEL_EDGE); return 1; }
             if (k == '3') { applyMode(SEL_FACE); return 1; }
+            if (k == 'g' || k == 'G') { grabStart(); return 1; }
+            if ((st & FL_CTRL) && (k == 'z' || k == 'Z')) { doUndo(); return 1; }
+            if ((st & FL_CTRL) && (k == 'y' || k == 'Y')) { doRedo(); return 1; }
             return 1;
         }
         case FL_KEYUP:
@@ -543,24 +731,43 @@ static void modeButtonCb(Fl_Widget *w, void *v)
     else                       view->applyMode(SEL_FACE);
 }
 
+/* Menu callbacks. Undo/Redo also have Ctrl+Z/Y accelerators; the viewport
+   handles those keys when focused, so exactly one undo fires either way. */
+static int confirmExit()
+{
+    /* b0 "Cancel" is the default (Enter/Esc) — safe default for a destructive
+       action; returns 1 only when "Exit" is explicitly chosen. */
+    return fl_choice("Exit the SOOB editor?", "Cancel", "Exit", 0) == 1;
+}
+static void menuExitCb(Fl_Widget *, void *v) { if (confirmExit()) ((Fl_Window *)v)->hide(); }
+static void winCloseCb(Fl_Widget *w, void *) { if (confirmExit()) w->hide(); }
+static void menuUndoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doUndo(); }
+static void menuRedoCb(Fl_Widget *, void *v) { ((EditorView *)v)->doRedo(); }
+
 int main(int argc, char **argv)
 {
     Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
 
     const int W = 1024, H = 768;
+    const int MB = 25;                 /* menu-bar height */
     const int TB = 30;                 /* toolbar height */
     const int PW = 220;                /* right property-panel width */
+    const int TOP = MB + TB;           /* content top (below menu + toolbar) */
 
     Fl_Window *win = new Fl_Window(W, H, "SOOB Level Editor");
     win->begin();
 
+    /* Menu bar. Child widget coords are absolute (window space), so the toolbar
+       and everything below it are offset by the menu/toolbar heights. */
+    Fl_Menu_Bar *menu = new Fl_Menu_Bar(0, 0, W, MB);
+
     /* Toolbar: select-mode radio buttons, icons from editor/icons/*.xpm.
        FL_RADIO_BUTTON gives one-lit-at-a-time behaviour for free. */
-    Fl_Group *toolbar = new Fl_Group(0, 0, W, TB);
+    Fl_Group *toolbar = new Fl_Group(0, MB, W, TB);
     toolbar->box(FL_UP_BOX);
-    Fl_Button *bVert = new Fl_Button(4,  3, 34, TB - 6);
-    Fl_Button *bEdge = new Fl_Button(40, 3, 34, TB - 6);
-    Fl_Button *bFace = new Fl_Button(76, 3, 34, TB - 6);
+    Fl_Button *bVert = new Fl_Button(4,  MB + 3, 34, TB - 6);
+    Fl_Button *bEdge = new Fl_Button(40, MB + 3, 34, TB - 6);
+    Fl_Button *bFace = new Fl_Button(76, MB + 3, 34, TB - 6);
     bVert->image(new Fl_Pixmap(mode_vert_xpm)); bVert->type(FL_RADIO_BUTTON);
     bEdge->image(new Fl_Pixmap(mode_edge_xpm)); bEdge->type(FL_RADIO_BUTTON);
     bFace->image(new Fl_Pixmap(mode_face_xpm)); bFace->type(FL_RADIO_BUTTON);
@@ -572,16 +779,16 @@ int main(int argc, char **argv)
 
     /* Right-side property panel — placeholder for now (future per-element
        material / tiling / transform editing). Fixed width, anchored right. */
-    Fl_Group *panel = new Fl_Group(W - PW, TB, PW, H - TB);
+    Fl_Group *panel = new Fl_Group(W - PW, TOP, PW, H - TOP);
     panel->box(FL_UP_BOX);
-    Fl_Box *ptitle = new Fl_Box(W - PW, TB, PW, 22, "Properties");
+    Fl_Box *ptitle = new Fl_Box(W - PW, TOP, PW, 22, "Properties");
     ptitle->labelfont(FL_HELVETICA_BOLD);
     ptitle->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
     panel->end();
     panel->resizable(NULL);
 
-    /* GL viewport fills the area left of the panel, below the toolbar. */
-    EditorView *view = new EditorView(0, TB, W - PW, H - TB);
+    /* GL viewport fills the area left of the panel, below menu + toolbar. */
+    EditorView *view = new EditorView(0, TOP, W - PW, H - TOP);
     if (argc > 1) view->objPath = argv[1];
     if (argc > 2) view->entPath = argv[2];
 
@@ -595,8 +802,19 @@ int main(int argc, char **argv)
     bFace->callback(modeButtonCb, view);
     view->applyMode(SEL_VERT);
 
+    /* Menu items (added after `view` exists for the Edit callbacks). Stash the
+       Undo/Redo item indices so the view can grey them out when empty. */
+    menu->add("File/Exit", 0, menuExitCb, win);
+    view->menuBar = menu;
+    view->undoIdx = menu->add("Edit/Undo", FL_COMMAND + 'z', menuUndoCb, view);
+    view->redoIdx = menu->add("Edit/Redo", FL_COMMAND + 'y', menuRedoCb, view);
+    view->updateMenuEnabled();             /* both start greyed (empty stacks) */
+
+    win->callback(winCloseCb);             /* confirm on the window close button too */
+
     conLogf("SOOB Level Editor — right-drag look, WASD move, Q/E down/up, wheel dolly\n");
     conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
+    conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
     win->show(argc, argv);
