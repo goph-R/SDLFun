@@ -190,6 +190,8 @@ public:
     int   suppressRelease;      /* skip the select on a grab-confirm click */
     int   grabFromExtrude;      /* grab launched by extrude (cancel = full undo) */
     int   grabIsEnt;            /* EM1: grab is moving entities, not mesh verts */
+    int   rotating;             /* EM2: modal yaw-rotate of selected entities */
+    float *grabOrigYaw;         /* EM2: pre-rotate rotY per gathered entity */
 
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
@@ -209,7 +211,7 @@ public:
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
-          grabIsEnt(0),
+          grabIsEnt(0), rotating(0), grabOrigYaw(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
@@ -672,9 +674,10 @@ public:
 
     void grabEnd()
     {
-        free(grabVerts); free(grabOrig);
-        grabVerts = NULL; grabOrig = NULL;
-        nGrab = 0; grabbing = 0; grabAxis = -1; grabFromExtrude = 0; grabIsEnt = 0;
+        free(grabVerts); free(grabOrig); free(grabOrigYaw);
+        grabVerts = NULL; grabOrig = NULL; grabOrigYaw = NULL;
+        nGrab = 0; grabbing = 0; rotating = 0;
+        grabAxis = -1; grabFromExtrude = 0; grabIsEnt = 0;
     }
 
     /* EM1: collect the selected entities' slot indices + pre-grab origins +
@@ -688,15 +691,17 @@ public:
             if (entSel[i] && scene.entities->entities[i].active) n++;
         if (n == 0) return 0;
 
-        grabVerts = (int *)malloc(n * sizeof(int));
-        grabOrig  = (Vec3 *)malloc(n * sizeof(Vec3));
+        grabVerts   = (int *)malloc(n * sizeof(int));
+        grabOrig    = (Vec3 *)malloc(n * sizeof(Vec3));
+        grabOrigYaw = (float *)malloc(n * sizeof(float));   /* EM2: rotate uses this */
         nGrab = 0;
         Vec3 c = editV3(0, 0, 0);
         for (i = 0; i < nE; i++) {
             if (!entSel[i] || !scene.entities->entities[i].active) continue;
             Entity *e = &scene.entities->entities[i];
-            grabVerts[nGrab] = i;
-            grabOrig[nGrab]  = editV3(e->posX, e->posY, e->posZ);
+            grabVerts[nGrab]   = i;
+            grabOrig[nGrab]    = editV3(e->posX, e->posY, e->posZ);
+            grabOrigYaw[nGrab] = e->rotY;
             c = editV3Add(c, grabOrig[nGrab]);
             nGrab++;
         }
@@ -808,6 +813,63 @@ public:
         redraw();
     }
 
+    /* ---- EM2: modal yaw-rotate (entities only) --------------------------- */
+
+    void rotStart()
+    {
+        if (grabbing || rotating) return;
+        if (sel.mode != SEL_ENTITY) return;           /* no mesh rotate */
+        if (grabGatherEnts() == 0) { conLogf("rotate: no entity selected\n"); return; }
+        docPushEnts(&hist, scene.entities);            /* pre-rotate restore point */
+        rotating = 1;
+        grabAnchorX = grabCurX = Fl::event_x();
+        grabAnchorY = grabCurY = Fl::event_y();
+        updateMenuEnabled();
+        conLogf("rotate: %d entity(ies)\n", nGrab);
+    }
+
+    /* Yaw = snapped angle from horizontal mouse travel (15 deg steps, 1 deg with
+       Shift). Each entity spins about the shared centroid in XZ — in place when
+       only one is selected — and its rotY advances by the same angle, so a
+       multi-selection rotates rigidly (orbit + facing match glRotatef about Y). */
+    void rotApply()
+    {
+        const float DEG_PER_PX = 0.5f;
+        float step = (Fl::event_state() & FL_SHIFT) ? 1.0f : 15.0f;
+        float raw  = (float)(grabCurX - grabAnchorX) * DEG_PER_PX;
+        float ang  = step * floorf(raw / step + 0.5f);         /* snap to step */
+        float rad  = ang * 3.14159265f / 180.0f;
+        float c = cosf(rad), s = sinf(rad);
+        for (int k = 0; k < nGrab; k++) {
+            Entity *e = &scene.entities->entities[grabVerts[k]];
+            float dx = grabOrig[k].x - grabCentroid.x;
+            float dz = grabOrig[k].z - grabCentroid.z;
+            e->posX = editSnap(grabCentroid.x + dx * c + dz * s);
+            e->posZ = editSnap(grabCentroid.z - dx * s + dz * c);
+            e->posY = grabOrig[k].y;
+            e->rotY = grabOrigYaw[k] + ang;
+        }
+        refreshPanel();
+        redraw();
+    }
+
+    void rotUpdate(int mx, int my) { grabCurX = mx; grabCurY = my; rotApply(); }
+    void rotConfirm() { grabEnd(); refreshPanel(); redraw(); }   /* snapshot on stack */
+
+    void rotCancel()
+    {
+        for (int k = 0; k < nGrab; k++) {
+            Entity *e = &scene.entities->entities[grabVerts[k]];
+            e->posX = grabOrig[k].x; e->posY = grabOrig[k].y; e->posZ = grabOrig[k].z;
+            e->rotY = grabOrigYaw[k];
+        }
+        docDropUndoTop(&hist);                          /* back to pre-rotate: drop it */
+        grabEnd();
+        updateMenuEnabled();
+        refreshPanel();
+        redraw();
+    }
+
     /* After an undo/redo restores the mesh: rebuild the render mesh, and only
        re-init the selection if the vert/face counts changed (topology edit);
        for a grab (counts stable) the selection stays valid. */
@@ -845,8 +907,8 @@ public:
     /* Undo/redo entry points shared by the Ctrl+Z/Y keys and the Edit menu.
        Disabled mid-grab (finish or cancel the grab first). One stack spans mesh
        and entity edits, so Ctrl+Z always reverts the most recent of either. */
-    void doUndo() { if (!grabbing) afterDocRestore(docUndo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
-    void doRedo() { if (!grabbing) afterDocRestore(docRedo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
+    void doUndo() { if (!grabbing && !rotating) afterDocRestore(docUndo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
+    void doRedo() { if (!grabbing && !rotating) afterDocRestore(docRedo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
 
     /* ---- M3: make-face / flip / delete / add-primitive ------------------ */
 
@@ -1262,11 +1324,13 @@ public:
     {
         switch (e) {
         case FL_PUSH:
-            if (grabbing) {
-                /* left = confirm the move, right = cancel it; swallow the
+            if (grabbing || rotating) {
+                /* left = confirm, right = cancel (grab or rotate); swallow the
                    matching release so it doesn't also select. */
-                if (Fl::event_button() == FL_LEFT_MOUSE)       grabConfirm();
-                else if (Fl::event_button() == FL_RIGHT_MOUSE) grabCancel();
+                int left  = (Fl::event_button() == FL_LEFT_MOUSE);
+                int right = (Fl::event_button() == FL_RIGHT_MOUSE);
+                if (grabbing) { if (left) grabConfirm(); else if (right) grabCancel(); }
+                else          { if (left) rotConfirm();  else if (right) rotCancel();  }
                 suppressRelease = 1;
                 return 1;
             }
@@ -1324,7 +1388,8 @@ public:
         case FL_ENTER:
             return 1;               /* claim belowmouse so FL_MOVE arrives */
         case FL_MOVE:
-            if (grabbing) grabUpdate(Fl::event_x(), Fl::event_y());
+            if (grabbing)      grabUpdate(Fl::event_x(), Fl::event_y());
+            else if (rotating) rotUpdate(Fl::event_x(), Fl::event_y());
             return 1;
         case FL_FOCUS:
         case FL_UNFOCUS:
@@ -1342,13 +1407,21 @@ public:
                 if (k == FL_Escape) { grabCancel(); return 1; }
                 return 1;
             }
-            /* 1/2/3 select mode; G grab; Ctrl+Z / Ctrl+Y undo/redo. WASD/QE
-               movement is polled by the frame timer, so it's untouched here. */
+            if (rotating) {
+                /* Enter confirms, Esc cancels; everything else swallowed. Shift
+                   (fine step) is read live in rotApply on the next mouse move. */
+                if (k == FL_Enter || k == FL_KP_Enter) { rotConfirm(); return 1; }
+                if (k == FL_Escape) { rotCancel(); return 1; }
+                return 1;
+            }
+            /* 1/2/3/4 select mode; G grab; R rotate (entities); Ctrl+Z/Y undo.
+               WASD/QE movement is polled by the frame timer, untouched here. */
             if (k == '1') { applyMode(SEL_VERT); return 1; }
             if (k == '2') { applyMode(SEL_EDGE); return 1; }
             if (k == '3') { applyMode(SEL_FACE); return 1; }
             if (k == '4') { applyMode(SEL_ENTITY); return 1; }
             if (k == 'g' || k == 'G') { grabStart(); return 1; }
+            if (k == 'r' || k == 'R') { rotStart(); return 1; }
             /* Mesh ops act on the geometry document, so they're inert in entity
                mode (grabStart above already no-ops there — no verts to gather).
                EM4 will give entity mode its own delete. */
@@ -1557,7 +1630,8 @@ int main(int argc, char **argv)
 
     conLogf("SOOB Level Editor — right-drag look, WASD move, PgUp/PgDn up/down, wheel dolly\n");
     conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3/4 = vertex/edge/face/entity mode\n");
-    conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
+    conLogf("  G = grab (X/Y/Z lock), R = rotate entities (yaw, Shift=fine), click/Enter confirm, Esc cancel\n");
+    conLogf("  Ctrl+Z / Ctrl+Y = undo/redo\n");
     conLogf("  E = extrude, F = make face (3-4 verts), N = recalc normals, M = merge verts, X/Del = delete\n");
     conLogf("  Ctrl+S save, Ctrl+O open, File > Export OBJ (.lvl native; OBJ+MTL for engine/Blender)\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
