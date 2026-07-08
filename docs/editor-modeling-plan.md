@@ -122,7 +122,8 @@ polish-tail.
 | **M4** | **Extrude** *(the core verb)* — select faces, push out, auto-grab. | **done** |
 | **M5** | Materials panel: per-face assign + tiling spinners, live. | **done** |
 | **M6** | `.lvl` save/load + OBJ/MTL export; round-trip a Blender bake. | **done** |
-| polish | Merge-by-distance, recalc-normals, gizmos, box-select, loop-select, numeric entry, snap toggle. | |
+| polish | **Merge-by-distance** + **recalc-normals** (pair with extrude). | **done** |
+| polish | Gizmos, box-select, loop-select, numeric entry during grab, snap toggle. | |
 
 ## Spine
 

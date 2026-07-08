@@ -65,6 +65,13 @@
 #include "icons/mode_vert.xpm"
 #include "icons/mode_edge.xpm"
 #include "icons/mode_face.xpm"
+#include "icons/mode_entity.xpm"
+
+/* Boot-splash art (GIMP-exported XPM). GIMP names the array after the source
+   file's full path; it was normalised to `splash_xpm` by hand (the raw name is
+   not a valid C identifier). Draw a new splash in editor/images/splash.xpm and
+   keep that array name. */
+#include "images/splash.xpm"
 
 /* The engine's header-only modules all call conLogf() (the game routes it to
    its dev console). The editor has no console, so provide a plain stdout sink
@@ -113,6 +120,23 @@ static void *editGLGetProc(const char *name)
 }
 #endif
 
+/* ---- Boot splash ----------------------------------------------------------
+ * A frameless window (image + a status line) shown on top of the main window
+ * while the first-frame load runs. On the Win98/P3 target that load (level OBJ
+ * + texture uploads) is slow enough that per-phase feedback is real, not a
+ * flash. bootstrap() ticks the status line through its phases via
+ * splashStatus(); main() owns the window's lifetime and hides it when done. */
+static Fl_Window *gSplash     = 0;
+static Fl_Box    *gSplashText = 0;
+
+static void splashStatus(const char *msg)
+{
+    if (!gSplashText) return;
+    gSplashText->copy_label(msg);
+    gSplashText->redraw();
+    Fl::check();                 /* pump so the label repaints mid-load */
+}
+
 class EditorView : public Fl_Gl_Window {
 public:
     const char   *objPath;
@@ -122,6 +146,7 @@ public:
     AssetRegistry assetReg;
     int           loaded;      /* level loaded OK */
     int           bootstrapped; /* GL init + load done (needs live context) */
+    int           booting;      /* re-entry guard while bootstrap() runs */
 
     /* M0: the editor's own mesh (a demo cube for now) rendered through the
        new EditMesh -> ObjMesh -> engine path, alongside the loaded level. */
@@ -133,7 +158,12 @@ public:
     int           pushX, pushY; /* mouse-down point, for click-vs-drag */
 
     /* Toolbar mode buttons (radio); kept in sync with sel.mode both ways. */
-    Fl_Button    *bVert, *bEdge, *bFace;
+    Fl_Button    *bVert, *bEdge, *bFace, *bEnt;
+
+    /* EM0: entity selection (mode SEL_ENTITY). Entities aren't part of the mesh,
+       so this lives on the view — NOT in EditSelection, which is freed/rebuilt on
+       every topology edit. One flag per entity slot (index == identity). */
+    unsigned char entSel[MAX_ENTITIES];
 
     EditHistory   hist;         /* M2: snapshot undo/redo */
     Fl_Menu_Bar  *menuBar;      /* Edit menu, for greying out Undo/Redo */
@@ -168,8 +198,8 @@ public:
         : Fl_Gl_Window(X, Y, W, H),
           objPath("assets/levels/test_level.obj"),
           entPath("assets/levels/test_level.ent"),
-          loaded(0), bootstrapped(0), haveEmesh(0), pushX(0), pushY(0),
-          bVert(0), bEdge(0), bFace(0),
+          loaded(0), bootstrapped(0), booting(0), haveEmesh(0), pushX(0), pushY(0),
+          bVert(0), bEdge(0), bFace(0), bEnt(0),
           menuBar(0), undoIdx(-1), redoIdx(-1),
           propPanel(0), faceGroup(0), vertGroup(0),
           matChoice(0), diffuseInput(0), scaleInput(0), offXInput(0), offYInput(0),
@@ -182,6 +212,7 @@ public:
     {
         mode(FL_RGB | FL_DEPTH | FL_DOUBLE);
         editHistoryInit(&hist);
+        memset(entSel, 0, sizeof(entSel));
     }
 
     /* eye + look-at target from the free-fly camera state. */
@@ -216,42 +247,64 @@ public:
         glLightfv(GL_LIGHT0, GL_DIFFUSE, dif);
     }
 
+    /* One-time GL init + asset/level load. Needs a live GL context (texture
+       uploads), so it runs on the first frame — or is driven explicitly from
+       main() with the boot splash up, whichever comes first. Re-entry-safe: the
+       Fl::check() inside splashStatus() can pump a draw() mid-load, and the
+       `booting` guard makes that draw() a no-op instead of a second load. */
+    void bootstrap()
+    {
+        if (bootstrapped || booting) return;
+        booting = 1;
+        make_current();               /* context may not be current when main() calls us */
+        initGL();
+
+        splashStatus("Loading assets...");
+        assetRegInit(&assetReg);
+        editLoadAssets(&assetReg, "assets.lua");  /* resolve entity mesh/tex names */
+
+        splashStatus("Loading level...");
+        loaded = editLoadLevel(&scene, objPath, entPath, &assetReg);
+        if (!loaded)
+            conLogf("editor: failed to load %s / %s\n", objPath, entPath);
+
+        /* M0: seed a hardcoded 2 m cube through the editor-mesh path. It borrows
+           the loaded level's first material so it's textured with a real
+           box-mapped diffuse; falls back to flat grey otherwise. */
+        splashStatus("Building mesh...");
+        editMeshInit(&emesh);
+        if (loaded && scene.level.numMaterials > 0) {
+            emesh.mats[0] = scene.level.materials[0];
+        } else {
+            memset(&emesh.mats[0], 0, sizeof(Material));
+            strcpy(emesh.mats[0].name, "editor_default");
+            emesh.mats[0].tilingScale = 1.0f;
+        }
+        emesh.numMats = 1;
+        editAddCube(&emesh, 0.0f, 1.0f, -4.0f, 2.0f, 2.0f, 2.0f, 0);
+        objInit(&eobj);
+        editMeshBuild(&emesh, &eobj);
+        editSelInit(&sel, &emesh);   /* M1: selection + derived edge list */
+        haveEmesh = (loaded != 0);   /* renderer needs scene.texCache valid */
+        rebuildMatChoice();          /* M5: fill the material dropdown */
+        refreshPanel();
+        conLogf("editor: demo cube built (%d tris, %d sectors, %d edges)\n",
+                eobj.numTris, eobj.numSectors, sel.numEdges);
+
+        splashStatus("Ready");
+        bootstrapped = 1;
+        booting = 0;
+    }
+
     void draw()
     {
-        /* First live frame: context is current, so GL setup + level load
-           (which may upload textures) are safe to run here rather than in the
-           constructor. */
-        if (!bootstrapped) {
-            initGL();
-            assetRegInit(&assetReg);
-            editLoadAssets(&assetReg, "assets.lua");  /* resolve entity mesh/tex names */
-            loaded = editLoadLevel(&scene, objPath, entPath, &assetReg);
-            if (!loaded)
-                conLogf("editor: failed to load %s / %s\n", objPath, entPath);
-
-            /* M0: seed a hardcoded 2 m cube through the editor-mesh path. It
-               borrows the loaded level's first material so it's textured with a
-               real box-mapped diffuse; falls back to flat grey otherwise. */
-            editMeshInit(&emesh);
-            if (loaded && scene.level.numMaterials > 0) {
-                emesh.mats[0] = scene.level.materials[0];
-            } else {
-                memset(&emesh.mats[0], 0, sizeof(Material));
-                strcpy(emesh.mats[0].name, "editor_default");
-                emesh.mats[0].tilingScale = 1.0f;
-            }
-            emesh.numMats = 1;
-            editAddCube(&emesh, 0.0f, 1.0f, -4.0f, 2.0f, 2.0f, 2.0f, 0);
-            objInit(&eobj);
-            editMeshBuild(&emesh, &eobj);
-            editSelInit(&sel, &emesh);   /* M1: selection + derived edge list */
-            haveEmesh = (loaded != 0);   /* renderer needs scene.texCache valid */
-            rebuildMatChoice();          /* M5: fill the material dropdown */
-            refreshPanel();
-            conLogf("editor: demo cube built (%d tris, %d sectors, %d edges)\n",
-                    eobj.numTris, eobj.numSectors, sel.numEdges);
-
-            bootstrapped = 1;
+        /* First live frame: context is current, so the load is safe to run here
+           if main() hasn't already driven it (see bootstrap()). */
+        if (!bootstrapped) bootstrap();
+        if (booting) {                 /* re-entrant draw mid-load: just clear */
+            glClearColor(0.16f, 0.17f, 0.21f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            return;
         }
 
         int pw = w() > 0 ? w() : 1;
@@ -287,6 +340,7 @@ public:
         }
 
         drawOverlay();
+        drawEntityMarkers();
     }
 
     /* M1: draw the edit-mesh wireframe + the current selection. Everything is
@@ -368,7 +422,7 @@ public:
             }
             glEnd();
             glLineWidth(1.0f);
-        } else { /* SEL_VERT */
+        } else if (sel.mode == SEL_VERT) {
             glPointSize(8.0f);
             glColor3f(1.0f, 0.6f, 0.1f);
             glBegin(GL_POINTS);
@@ -419,6 +473,41 @@ public:
         glEnable(GL_LIGHTING);
     }
 
+    /* EM0: entity markers. In entity mode only, draw a small always-on-top gizmo
+       at every active entity so meshless ones (waypoints, triggers, spawns, ...)
+       are visible and clickable too — dim blue unselected, bright orange (the
+       same 1.0,0.6,0.1 as the mesh selection) when selected. Never drawn in the
+       geometry modes, so it doesn't clutter them. */
+    void drawEntityMarkers()
+    {
+        if (sel.mode != SEL_ENTITY || !loaded || !scene.entities) return;
+        glDisable(GL_LIGHTING);
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_DEPTH_TEST);          /* markers always visible, even behind walls */
+        int n = scene.entities->count;
+        for (int i = 0; i < n; i++) {
+            Entity *e = &scene.entities->entities[i];
+            if (!e->active) continue;
+            int on = entSel[i];
+            float s = on ? 0.40f : 0.25f;
+            if (on) { glLineWidth(2.5f); glColor3f(1.0f, 0.6f, 0.1f); }
+            else    { glLineWidth(1.0f); glColor3f(0.55f, 0.8f, 1.0f); }
+            float x = e->posX, y = e->posY, z = e->posZ;
+            glBegin(GL_LINES);                          /* 3-axis cross */
+            glVertex3f(x - s, y, z); glVertex3f(x + s, y, z);
+            glVertex3f(x, y - s, z); glVertex3f(x, y + s, z);
+            glVertex3f(x, y, z - s); glVertex3f(x, y, z + s);
+            glEnd();
+            glBegin(GL_LINE_LOOP);                      /* footprint square (XZ) */
+            glVertex3f(x - s, y, z - s); glVertex3f(x + s, y, z - s);
+            glVertex3f(x + s, y, z + s); glVertex3f(x - s, y, z + s);
+            glEnd();
+        }
+        glLineWidth(1.0f);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_LIGHTING);
+    }
+
     /* Poll held movement keys (called from the frame timer). Returns 1 if the
        camera moved (so the caller can redraw). */
     int moveFromKeys()
@@ -466,6 +555,30 @@ public:
         pc->vpW = pw; pc->vpH = ph;
     }
 
+    /* EM0: nearest active entity whose origin projects within radiusPx of the
+       cursor (front-most on ties), or -1. Entities are point objects, so this is
+       a screen-space origin-distance pick — cf. editPickVertex for the mesh. */
+    int pickEntity(const PickCam *pc, float mx, float my, float radiusPx)
+    {
+        if (!loaded || !scene.entities) return -1;
+        int best = -1;
+        float bestDepth = 1e30f;
+        float r2 = radiusPx * radiusPx;
+        int n = scene.entities->count;
+        for (int i = 0; i < n; i++) {
+            Entity *e = &scene.entities->entities[i];
+            if (!e->active) continue;
+            Vec3 p = editV3(e->posX, e->posY, e->posZ);
+            float sx, sy;
+            if (!editProject(pc, p, &sx, &sy)) continue;
+            float dx = sx - mx, dy = sy - my;
+            if (dx * dx + dy * dy > r2) continue;
+            float depth = editDepth(pc, p);
+            if (depth < bestDepth) { bestDepth = depth; best = i; }
+        }
+        return best;
+    }
+
     /* Pick at viewport-local (mx,my) in the active mode. additive (Shift)
        toggles the hit element and keeps the rest; a plain click replaces the
        selection (and clears it on a miss). */
@@ -481,10 +594,14 @@ public:
             int idx = editPickEdge(&pc, &emesh, sel.edges, sel.numEdges, mx, my, 8.0f);
             if (!additive) editSelClearActive(&sel);
             if (idx >= 0) sel.edgeSel[idx] = additive ? !sel.edgeSel[idx] : 1;
-        } else {
+        } else if (sel.mode == SEL_FACE) {
             int idx = editPickFace(&pc, &emesh, mx, my);
             if (!additive) editSelClearActive(&sel);
             if (idx >= 0) sel.faceSel[idx] = additive ? !sel.faceSel[idx] : 1;
+        } else { /* SEL_ENTITY */
+            int idx = pickEntity(&pc, mx, my, 12.0f);
+            if (!additive) memset(entSel, 0, sizeof(entSel));
+            if (idx >= 0) entSel[idx] = additive ? !entSel[idx] : 1;
         }
         refreshPanel();
         redraw();
@@ -499,6 +616,7 @@ public:
         if (bVert) bVert->value(m == SEL_VERT);
         if (bEdge) bEdge->value(m == SEL_EDGE);
         if (bFace) bFace->value(m == SEL_FACE);
+        if (bEnt)  bEnt->value(m == SEL_ENTITY);
         refreshPanel();
         redraw();
     }
@@ -792,6 +910,32 @@ public:
         conLogf("delete: -> %d verts, %d faces\n", emesh.numVerts, emesh.numFaces);
     }
 
+    /* N: recompute consistent, outward-facing normals (Blender Shift+N). Winding
+       only, so the selection survives — no afterTopologyEdit. */
+    void recalcNormals()
+    {
+        if (grabbing || !haveEmesh) return;
+        editHistoryPush(&hist, &emesh);
+        int flips = editRecalcNormalsConsistent(&emesh);
+        if (flips == 0) { editHistoryDropUndoTop(&hist); conLogf("recalc normals: already consistent\n"); return; }
+        editMeshBuild(&emesh, &eobj);
+        updateMenuEnabled();
+        redraw();
+        conLogf("recalc normals: %d face(s) flipped\n", flips);
+    }
+
+    /* M: weld coincident verts (merge-by-distance, half a snap cell). Topology
+       changes, so reset the selection via afterTopologyEdit. */
+    void mergeVerts()
+    {
+        if (grabbing || !haveEmesh) return;
+        editHistoryPush(&hist, &emesh);
+        int removed = editMergeByDistance(&emesh, EDIT_SNAP * 0.5f);
+        if (removed == 0) { editHistoryDropUndoTop(&hist); conLogf("merge: nothing to weld\n"); return; }
+        afterTopologyEdit();
+        conLogf("merge: welded %d vert(s)\n", removed);
+    }
+
     void addCube()
     {
         if (grabbing || !haveEmesh) return;
@@ -932,7 +1076,11 @@ public:
             faceGroup->hide();
             if (n == 1) { vertGroup->show(); refreshVertPanel(one); }
             else        { vertGroup->hide(); panelVert = -1; }
-        } else {
+        } else if (sel.mode == SEL_ENTITY) {
+            /* EM0: the per-type entity form is EM3; for now just clear the mesh
+               panels. (Explicit branch so ENTITY never aliases the edge case.) */
+            faceGroup->hide(); vertGroup->hide(); panelVert = -1;
+        } else {  /* SEL_EDGE */
             faceGroup->hide(); vertGroup->hide(); panelVert = -1;
         }
         if (propPanel) propPanel->redraw();
@@ -1060,7 +1208,8 @@ public:
                button is camera-only, so it never selects. */
             int dx = Fl::event_x() - pushX;
             int dy = Fl::event_y() - pushY;
-            if (Fl::event_button() == FL_LEFT_MOUSE && haveEmesh &&
+            if (Fl::event_button() == FL_LEFT_MOUSE &&
+                (haveEmesh || sel.mode == SEL_ENTITY) &&
                 dx * dx + dy * dy <= 16) {
                 /* EditorView is an Fl_Gl_Window (a subwindow), so event coords
                    are already local to the viewport — do NOT subtract x()/y(),
@@ -1126,10 +1275,18 @@ public:
             if (k == '1') { applyMode(SEL_VERT); return 1; }
             if (k == '2') { applyMode(SEL_EDGE); return 1; }
             if (k == '3') { applyMode(SEL_FACE); return 1; }
+            if (k == '4') { applyMode(SEL_ENTITY); return 1; }
             if (k == 'g' || k == 'G') { grabStart(); return 1; }
-            if (k == 'f' || k == 'F') { makeFace(); return 1; }
-            if (k == 'e' || k == 'E') { extrudeSelection(); return 1; }
-            if (k == 'x' || k == 'X' || k == FL_Delete) { deleteSelected(); return 1; }
+            /* Mesh ops act on the geometry document, so they're inert in entity
+               mode (grabStart above already no-ops there — no verts to gather).
+               EM4 will give entity mode its own delete. */
+            if (sel.mode != SEL_ENTITY) {
+                if (k == 'f' || k == 'F') { makeFace(); return 1; }
+                if (k == 'e' || k == 'E') { extrudeSelection(); return 1; }
+                if (k == 'n' || k == 'N') { recalcNormals(); return 1; }
+                if (k == 'm' || k == 'M') { mergeVerts(); return 1; }
+                if (k == 'x' || k == 'X' || k == FL_Delete) { deleteSelected(); return 1; }
+            }
             if ((st & FL_CTRL) && (k == 'z' || k == 'Z')) { doUndo(); return 1; }
             if ((st & FL_CTRL) && (k == 'y' || k == 'Y')) { doRedo(); return 1; }
             /* let Ctrl/Cmd combos through to the menu accelerators (Ctrl+S/O) */
@@ -1159,7 +1316,8 @@ static void modeButtonCb(Fl_Widget *w, void *v)
     EditorView *view = (EditorView *)v;
     if (w == view->bVert)      view->applyMode(SEL_VERT);
     else if (w == view->bEdge) view->applyMode(SEL_EDGE);
-    else                       view->applyMode(SEL_FACE);
+    else if (w == view->bFace) view->applyMode(SEL_FACE);
+    else                       view->applyMode(SEL_ENTITY);
 }
 
 /* Menu callbacks. Undo/Redo also have Ctrl+Z/Y accelerators; the viewport
@@ -1182,6 +1340,8 @@ static void menuAddCubeCb (Fl_Widget *, void *v) { ((EditorView *)v)->addCube();
 static void menuAddPlaneCb(Fl_Widget *, void *v) { ((EditorView *)v)->addPlane(); }
 static void menuMakeFaceCb(Fl_Widget *, void *v) { ((EditorView *)v)->makeFace(); }
 static void menuFlipCb    (Fl_Widget *, void *v) { ((EditorView *)v)->flipSelected(); }
+static void menuRecalcCb  (Fl_Widget *, void *v) { ((EditorView *)v)->recalcNormals(); }
+static void menuMergeCb   (Fl_Widget *, void *v) { ((EditorView *)v)->mergeVerts(); }
 static void menuDeleteCb  (Fl_Widget *, void *v) { ((EditorView *)v)->deleteSelected(); }
 
 /* Property-panel callbacks. */
@@ -1194,6 +1354,7 @@ static void vertPosCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onVertPosChan
 int main(int argc, char **argv)
 {
     Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
+    FL_NORMAL_SIZE = 12;               /* UI font: 12 px (FLTK default is 14) */
 
     const int W = 1024, H = 768;
     const int MB = 25;                 /* menu-bar height */
@@ -1215,12 +1376,15 @@ int main(int argc, char **argv)
     Fl_Button *bVert = new Fl_Button(4,  MB + 3, 34, TB - 6);
     Fl_Button *bEdge = new Fl_Button(40, MB + 3, 34, TB - 6);
     Fl_Button *bFace = new Fl_Button(76, MB + 3, 34, TB - 6);
+    Fl_Button *bEnt  = new Fl_Button(112, MB + 3, 34, TB - 6);
     bVert->image(new Fl_Pixmap(mode_vert_xpm)); bVert->type(FL_RADIO_BUTTON);
     bEdge->image(new Fl_Pixmap(mode_edge_xpm)); bEdge->type(FL_RADIO_BUTTON);
     bFace->image(new Fl_Pixmap(mode_face_xpm)); bFace->type(FL_RADIO_BUTTON);
+    bEnt->image(new Fl_Pixmap(mode_entity_xpm)); bEnt->type(FL_RADIO_BUTTON);
     bVert->tooltip("Vertex select (1)");
     bEdge->tooltip("Edge select (2)");
     bFace->tooltip("Face select (3)");
+    bEnt->tooltip("Entity select (4)");
     toolbar->end();
     toolbar->resizable(NULL);          /* buttons stay put when the window resizes */
 
@@ -1275,10 +1439,11 @@ int main(int argc, char **argv)
     win->resizable(view);              /* only the viewport grows/shrinks */
 
     /* Wire the toolbar buttons to the view, then light the initial mode. */
-    view->bVert = bVert; view->bEdge = bEdge; view->bFace = bFace;
+    view->bVert = bVert; view->bEdge = bEdge; view->bFace = bFace; view->bEnt = bEnt;
     bVert->callback(modeButtonCb, view);
     bEdge->callback(modeButtonCb, view);
     bFace->callback(modeButtonCb, view);
+    bEnt->callback(modeButtonCb, view);
     view->applyMode(SEL_VERT);
 
     /* Wire the property panel (widgets built above, in the panel groups). */
@@ -1309,22 +1474,55 @@ int main(int argc, char **argv)
 
     menu->add("Add/Cube",          0,         menuAddCubeCb,  view);
     menu->add("Add/Plane",         0,         menuAddPlaneCb, view);
-    menu->add("Mesh/Extrude",      'e',       menuExtrudeCb,  view);
-    menu->add("Mesh/Make Face",    'f',       menuMakeFaceCb, view);
-    menu->add("Mesh/Flip Normals", 0,         menuFlipCb,     view);
-    menu->add("Mesh/Delete",       FL_Delete, menuDeleteCb,   view);
+    menu->add("Mesh/Extrude",         'e',       menuExtrudeCb,  view);
+    menu->add("Mesh/Make Face",       'f',       menuMakeFaceCb, view);
+    menu->add("Mesh/Flip Normals",    0,         menuFlipCb,     view);
+    menu->add("Mesh/Recalc Normals",  'n',       menuRecalcCb,   view);
+    menu->add("Mesh/Merge Verts",     'm',       menuMergeCb,    view);
+    menu->add("Mesh/Delete",          FL_Delete, menuDeleteCb,   view);
 
     win->callback(winCloseCb);             /* confirm on the window close button too */
 
     conLogf("SOOB Level Editor — right-drag look, WASD move, PgUp/PgDn up/down, wheel dolly\n");
-    conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3 = vertex/edge/face mode\n");
+    conLogf("  left-click = select, Shift+left-click = add/toggle, 1/2/3/4 = vertex/edge/face/entity mode\n");
     conLogf("  G = grab (X/Y/Z lock, click/Enter confirm, Esc cancel), Ctrl+Z / Ctrl+Y = undo/redo\n");
-    conLogf("  E = extrude, F = make face (3-4 verts), X/Del = delete; Add & Mesh menus\n");
+    conLogf("  E = extrude, F = make face (3-4 verts), N = recalc normals, M = merge verts, X/Del = delete\n");
     conLogf("  Ctrl+S save, Ctrl+O open, File > Export OBJ (.lvl native; OBJ+MTL for engine/Blender)\n");
     conLogf("Loading %s / %s (run from repo root)\n", view->objPath, view->entPath);
 
-    win->show(argc, argv);
+    /* Boot splash: a frameless window (logo + status line) centred on screen,
+       shown while the main window's heavy first-frame load runs. Sized to the
+       image; the status line overlays its bottom strip. */
+    Fl_Pixmap *splashPix = new Fl_Pixmap(splash_xpm);
+    int sw = splashPix->w(), sh = splashPix->h();
+    gSplash = new Fl_Window((Fl::w() - sw) / 2, (Fl::h() - sh) / 2, sw, sh);
+    gSplash->border(0);
+    gSplash->begin();
+        Fl_Box *splashImg = new Fl_Box(0, 0, sw, sh);
+        splashImg->box(FL_NO_BOX);
+        splashImg->image(splashPix);
+        gSplashText = new Fl_Box(0, sh - 28, sw, 22);
+        gSplashText->box(FL_NO_BOX);   /* label only, no fill over the image */
+        gSplashText->align(FL_ALIGN_INSIDE | FL_ALIGN_CENTER);
+        gSplashText->labelfont(FL_HELVETICA_BOLD);
+        gSplashText->labelsize(12);
+        gSplashText->labelcolor(FL_WHITE);
+        gSplashText->copy_label("Starting...");
+    gSplash->end();
+    gSplash->show();
+    Fl::check();                       /* paint the splash before the load blocks */
+
+    win->show(argc, argv);             /* GL context becomes valid here */
     view->take_focus();
+    gSplash->show();                   /* re-raise above the just-shown main window */
+
+    view->bootstrap();                 /* run the load now, ticking the status line */
+
+    gSplash->hide();
+    win->redraw();                     /* repaint the area the splash covered */
+    delete gSplash; gSplash = 0; gSplashText = 0;
+    delete splashPix;
+
     Fl::add_timeout(1.0 / 60.0, frameTimer, view);
 
     return Fl::run();

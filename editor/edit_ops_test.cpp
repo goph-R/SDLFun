@@ -104,6 +104,80 @@ int main(void)
         editMeshFree(&m);
     }
 
+    /* merge-by-distance: a quad sharing two coincident corners with the cube
+       welds those two verts (12 -> 10), keeping all 7 faces. */
+    {
+        EditMesh m; freshCube(&m);                  /* verts 5=(1,0,1) 6=(1,2,1) */
+        editAddQuad(&m, V(1,0,1), V(1,2,1), V(3,2,1), V(3,0,1), 0);
+        CHECK(m.numVerts == 12);
+        CHECK(m.numFaces == 7);
+        int removed = editMergeByDistance(&m, EDIT_SNAP * 0.5f);
+        CHECK(removed == 2);
+        CHECK(m.numVerts == 10);
+        CHECK(m.numFaces == 7);                     /* nothing collapsed */
+        editMeshFree(&m);
+    }
+
+    /* merge collapses a degenerate quad: a quad with two coincident corners
+       (a,a,b,c) welds to a triangle, faces stay (the tri survives). */
+    {
+        EditMesh m; editMeshInit(&m);
+        memset(&m.mats[0], 0, sizeof(Material)); m.mats[0].tilingScale = 1.0f; m.numMats = 1;
+        editAddQuad(&m, V(0,0,0), V(0,0,0.002f), V(1,0,0), V(1,0,1), 0);  /* 0~1 */
+        CHECK(m.numVerts == 4);
+        int removed = editMergeByDistance(&m, EDIT_SNAP * 0.5f);
+        CHECK(removed == 1);
+        CHECK(m.numVerts == 3);
+        CHECK(m.numFaces == 1);
+        CHECK(m.faces[0].nv == 3);                  /* quad -> tri */
+        editMeshFree(&m);
+    }
+
+    /* recalc-outside: flip one face of a closed cube inward, recalc fixes it so
+       every face normal points away from the cube centre (0,1,0). */
+    {
+        EditMesh m; freshCube(&m);
+        editFlipFace(&m, 4);                        /* top face now inward */
+        int flips = editRecalcNormalsConsistent(&m);
+        CHECK(flips >= 1);
+        Vec3 ctr = V(0, 1, 0);
+        int i, j, allOut = 1;
+        for (i = 0; i < m.numFaces; i++) {
+            EditFace *f = &m.faces[i];
+            Vec3 c = V(0,0,0);
+            for (j = 0; j < f->nv; j++) {
+                c.x += m.verts[f->v[j]].pos.x; c.y += m.verts[f->v[j]].pos.y;
+                c.z += m.verts[f->v[j]].pos.z;
+            }
+            c.x /= f->nv; c.y /= f->nv; c.z /= f->nv;
+            float d = f->normal.x*(c.x-ctr.x) + f->normal.y*(c.y-ctr.y) + f->normal.z*(c.z-ctr.z);
+            if (d <= 0.0f) allOut = 0;
+        }
+        CHECK(allOut == 1);
+        editMeshFree(&m);
+    }
+
+    /* recalc on an already-outward cube is a no-op (0 flips), stays outward. */
+    {
+        EditMesh m; freshCube(&m);
+        int flips = editRecalcNormalsConsistent(&m);
+        CHECK(flips == 0);
+        editMeshFree(&m);
+    }
+
+    /* recalc on an open shell (single quad) only enforces consistency — it must
+       not spuriously flip the lone face (no closed volume to orient to). */
+    {
+        EditMesh m; editMeshInit(&m);
+        memset(&m.mats[0], 0, sizeof(Material)); m.mats[0].tilingScale = 1.0f; m.numMats = 1;
+        editAddQuad(&m, V(0,0,0), V(1,0,0), V(1,0,1), V(0,0,1), 0);
+        Vec3 before = m.faces[0].normal;
+        int flips = editRecalcNormalsConsistent(&m);
+        CHECK(flips == 0);
+        CHECK(m.faces[0].normal.y * before.y > 0.0f);   /* same side */
+        editMeshFree(&m);
+    }
+
     printf(failures ? "\n%d FAILURE(S)\n" : "\nALL PASS\n", failures);
     return failures ? 1 : 0;
 }

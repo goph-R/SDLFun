@@ -3,10 +3,13 @@
 
 /* ---- Editor selection state (M1) ------------------------------------------
  *
- * Three selection modes (vertex / edge / face), à la Blender's 1/2/3. Each mode
- * keeps its own boolean selection array; conversion between modes (select a
- * face -> its verts) is a later nicety. Selection is what picking writes and
- * what the overlay highlights.
+ * Four selection modes (vertex / edge / face / entity), à la Blender's 1/2/3/4.
+ * Each mesh mode keeps its own boolean selection array; conversion between modes
+ * (select a face -> its verts) is a later nicety. Selection is what picking
+ * writes and what the overlay highlights. SEL_ENTITY is only the shared mode
+ * tag here — entity selection state lives on the editor view, because entities
+ * aren't part of the mesh and must survive the mesh rebuilds that free/re-init
+ * this struct.
  *
  * Edges aren't stored in the mesh (an indexed face set has none) — they're
  * DERIVED here: unique undirected (a,b) pairs across all face edges, rebuilt
@@ -20,7 +23,7 @@
 #include <cstring>
 #include "edit_mesh.h"
 
-typedef enum { SEL_VERT = 0, SEL_EDGE = 1, SEL_FACE = 2 } EditSelMode;
+typedef enum { SEL_VERT = 0, SEL_EDGE = 1, SEL_FACE = 2, SEL_ENTITY = 3 } EditSelMode;
 
 typedef struct { int a, b; } EditEdge;   /* a < b (vertex indices) */
 
@@ -93,7 +96,9 @@ static void editSelClearActive(EditSelection *s)
 {
     if (s->mode == SEL_VERT) memset(s->vertSel, 0, s->numVerts);
     else if (s->mode == SEL_EDGE) memset(s->edgeSel, 0, s->numEdges);
-    else memset(s->faceSel, 0, s->numFaces);
+    else if (s->mode == SEL_FACE) memset(s->faceSel, 0, s->numFaces);
+    /* SEL_ENTITY: entity selection lives on the view — nothing to clear here.
+       (Must stay explicit so ENTITY never falls through and wipes faceSel.) */
 }
 
 #endif /* EDIT_SELECT_H */
