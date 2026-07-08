@@ -180,6 +180,17 @@ public:
     int             panelVert;       /* the vertex the X/Y/Z fields edit, or -1 */
     int             vertEditPushed;  /* one undo push per vertex-edit gesture */
 
+    /* EM3: entity property form (entGroup). Common fields for any single-
+       selected entity; the light-only fields live in a nested group that
+       refreshEntPanel reveals for ENT_LIGHT. */
+    Fl_Group       *entGroup, *entLightGroup;
+    Fl_Input       *entNameIn, *entGroupIn;
+    Fl_Box         *entTypeBox;
+    Fl_Value_Input *entXIn, *entYIn, *entZIn, *entRotIn, *entScaleIn;
+    Fl_Value_Input *entLrIn, *entLgIn, *entLbIn, *entLiIn, *entLradIn;
+    int             panelEnt;        /* the entity the form edits, or -1 */
+    int             entEditPushed;   /* one undo push per entity-edit gesture */
+
     /* M2 grab (modal move): active while `grabbing`. The affected verts and
        their pre-grab positions are captured at start; the mouse delta
        (optionally axis-locked) moves them, snapped to 1 cm. */
@@ -208,6 +219,10 @@ public:
           propPanel(0), faceGroup(0), vertGroup(0),
           matChoice(0), diffuseInput(0), scaleInput(0), offXInput(0), offYInput(0),
           vxInput(0), vyInput(0), vzInput(0), panelVert(-1), vertEditPushed(0),
+          entGroup(0), entLightGroup(0), entNameIn(0), entGroupIn(0), entTypeBox(0),
+          entXIn(0), entYIn(0), entZIn(0), entRotIn(0), entScaleIn(0),
+          entLrIn(0), entLgIn(0), entLbIn(0), entLiIn(0), entLradIn(0),
+          panelEnt(-1), entEditPushed(0),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
@@ -478,6 +493,22 @@ public:
         glEnable(GL_LIGHTING);
     }
 
+    /* Three great-circle line loops (XZ / XY / YZ) — a cheap wire sphere for the
+       light gizmo. Caller sets colour + line width. */
+    void drawWireSphere(float cx, float cy, float cz, float rad, int segs)
+    {
+        int i; float a;
+        glBegin(GL_LINE_LOOP);
+        for (i = 0; i < segs; i++) { a = 6.2831853f * i / segs; glVertex3f(cx + rad*cosf(a), cy, cz + rad*sinf(a)); }
+        glEnd();
+        glBegin(GL_LINE_LOOP);
+        for (i = 0; i < segs; i++) { a = 6.2831853f * i / segs; glVertex3f(cx + rad*cosf(a), cy + rad*sinf(a), cz); }
+        glEnd();
+        glBegin(GL_LINE_LOOP);
+        for (i = 0; i < segs; i++) { a = 6.2831853f * i / segs; glVertex3f(cx, cy + rad*cosf(a), cz + rad*sinf(a)); }
+        glEnd();
+    }
+
     /* EM0: entity markers. In entity mode only, draw a small always-on-top gizmo
        at every active entity so meshless ones (waypoints, triggers, spawns, ...)
        are visible and clickable too — dim blue unselected, bright orange (the
@@ -507,6 +538,14 @@ public:
             glVertex3f(x - s, y, z - s); glVertex3f(x + s, y, z - s);
             glVertex3f(x + s, y, z + s); glVertex3f(x - s, y, z + s);
             glEnd();
+            if (e->type == ENT_LIGHT) {                 /* EM3: reach + colour */
+                float lr = e->light.r, lg = e->light.g, lb = e->light.b;
+                float mxc = lr > lg ? lr : lg; if (lb > mxc) mxc = lb;
+                if (mxc < 0.25f) { lr += 0.25f; lg += 0.25f; lb += 0.25f; }  /* stay visible */
+                glColor3f(lr, lg, lb);
+                glLineWidth(on ? 2.0f : 1.0f);
+                drawWireSphere(x, y, z, e->light.radius, 24);
+            }
         }
         glLineWidth(1.0f);
         glEnable(GL_DEPTH_TEST);
@@ -1198,6 +1237,7 @@ public:
     void refreshPanel()
     {
         if (!faceGroup || !vertGroup) return;
+        if (entGroup && sel.mode != SEL_ENTITY) entGroup->hide();
         if (sel.mode == SEL_FACE) {
             int n = 0;
             for (int i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) n++;
@@ -1211,9 +1251,16 @@ public:
             if (n == 1) { vertGroup->show(); refreshVertPanel(one); }
             else        { vertGroup->hide(); panelVert = -1; }
         } else if (sel.mode == SEL_ENTITY) {
-            /* EM0: the per-type entity form is EM3; for now just clear the mesh
-               panels. (Explicit branch so ENTITY never aliases the edge case.) */
+            /* EM3: show the entity form for exactly one selected entity. */
             faceGroup->hide(); vertGroup->hide(); panelVert = -1;
+            int one = -1, n = 0;
+            if (loaded && scene.entities)
+                for (int i = 0; i < scene.entities->count; i++)
+                    if (entSel[i] && scene.entities->entities[i].active) { one = i; n++; }
+            if (entGroup) {
+                if (n == 1) { entGroup->show(); refreshEntPanel(one); }
+                else        { entGroup->hide(); panelEnt = -1; }
+            }
         } else {  /* SEL_EDGE */
             faceGroup->hide(); vertGroup->hide(); panelVert = -1;
         }
@@ -1230,6 +1277,74 @@ public:
         emesh.verts[panelVert].pos.y = editSnap((float)vyInput->value());
         emesh.verts[panelVert].pos.z = editSnap((float)vzInput->value());
         editMeshBuild(&emesh, &eobj);
+        updateMenuEnabled();
+        redraw();
+    }
+
+    /* ---- EM3: entity property form ------------------------------------- */
+
+    static const char *entTypeName(int t)
+    {
+        switch (t) {
+        case ENT_PLAYER:     return "player";
+        case ENT_DECORATION: return "decoration";
+        case ENT_ITEM:       return "item";
+        case ENT_ENEMY:      return "enemy";
+        case ENT_PLATFORM:   return "platform";
+        case ENT_SWITCH:     return "switch";
+        case ENT_TRIGGER:    return "trigger";
+        case ENT_DOOR:       return "door";
+        case ENT_WAYPOINT:   return "waypoint";
+        case ENT_PATH_NODE:  return "path_node";
+        case ENT_LIGHT:      return "light";
+        default:             return "none";
+        }
+    }
+
+    /* Load the selected entity's fields into the form; reveal the light-only
+       sub-group for ENT_LIGHT. Resets the one-undo-per-gesture guard. */
+    void refreshEntPanel(int ei)
+    {
+        panelEnt = ei;
+        entEditPushed = 0;
+        Entity *e = &scene.entities->entities[ei];
+        entTypeBox->copy_label(entTypeName(e->type));
+        entNameIn->value(e->name);
+        entGroupIn->value(e->group);
+        entXIn->value(e->posX); entYIn->value(e->posY); entZIn->value(e->posZ);
+        entRotIn->value(e->rotY); entScaleIn->value(e->scale);
+        if (e->type == ENT_LIGHT) {
+            entLrIn->value(e->light.r); entLgIn->value(e->light.g); entLbIn->value(e->light.b);
+            entLiIn->value(e->light.intensity); entLradIn->value(e->light.radius);
+            entLightGroup->show();
+        } else {
+            entLightGroup->hide();
+        }
+    }
+
+    /* Write the form back into the entity — snapped position, one undo push per
+       edit gesture. Light fields apply only to ENT_LIGHT. */
+    void onEntChanged()
+    {
+        if (!loaded || !scene.entities) return;
+        if (panelEnt < 0 || panelEnt >= scene.entities->count) return;
+        Entity *e = &scene.entities->entities[panelEnt];
+        if (!e->active) return;
+        if (!entEditPushed) { docPushEnts(&hist, scene.entities); entEditPushed = 1; updateMenuEnabled(); }
+        strncpy(e->name,  entNameIn->value(),  31); e->name[31]  = '\0';
+        strncpy(e->group, entGroupIn->value(), 31); e->group[31] = '\0';
+        e->posX  = editSnap((float)entXIn->value());
+        e->posY  = editSnap((float)entYIn->value());
+        e->posZ  = editSnap((float)entZIn->value());
+        e->rotY  = (float)entRotIn->value();
+        e->scale = (float)entScaleIn->value();
+        if (e->type == ENT_LIGHT) {
+            e->light.r = (float)entLrIn->value();
+            e->light.g = (float)entLgIn->value();
+            e->light.b = (float)entLbIn->value();
+            e->light.intensity = (float)entLiIn->value();
+            e->light.radius    = (float)entLradIn->value();
+        }
         updateMenuEnabled();
         redraw();
     }
@@ -1495,6 +1610,7 @@ static void addMatCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onAddMaterial
 static void diffuseCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onDiffuseChanged(); }
 static void tilingCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onTilingChanged(); }
 static void vertPosCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onVertPosChanged(); }
+static void entFieldCb (Fl_Widget *, void *v) { ((EditorView *)v)->onEntChanged(); }
 
 int main(int argc, char **argv)
 {
@@ -1571,7 +1687,56 @@ int main(int argc, char **argv)
     vz->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
     vertGroup->end();
 
-    faceGroup->hide(); vertGroup->hide();        /* refreshPanel reveals one */
+    /* Entity props (EM3): common fields for any single-selected entity + a
+       nested light-only group (colour/intensity/radius) shown for ENT_LIGHT. */
+    Fl_Group *entGroup = new Fl_Group(W - PW, TOP, PW, H - TOP);
+    int ey = TOP + 12;
+    new Fl_Box(W - PW + 8, ey, 60, 18, "Type:");
+    Fl_Box *etype = new Fl_Box(px, ey, pw, 18, "");
+    etype->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE); etype->labelfont(FL_HELVETICA_BOLD);
+    ey += 26;
+    Fl_Input *ename = new Fl_Input(px, ey, pw, 22, "Name:");  ey += 26;
+    Fl_Input *egrp  = new Fl_Input(px, ey, pw, 22, "Group:"); ey += 28;
+    Fl_Value_Input *ex   = new Fl_Value_Input(px, ey, pw, 22, "X:");     ey += 26;
+    Fl_Value_Input *eyy  = new Fl_Value_Input(px, ey, pw, 22, "Y:");     ey += 26;
+    Fl_Value_Input *ez   = new Fl_Value_Input(px, ey, pw, 22, "Z:");     ey += 26;
+    Fl_Value_Input *erot = new Fl_Value_Input(px, ey, pw, 22, "RotY:");  ey += 26;
+    Fl_Value_Input *escl = new Fl_Value_Input(px, ey, pw, 22, "Scale:"); ey += 32;
+    ex->range(-10000, 10000); eyy->range(-10000, 10000); ez->range(-10000, 10000);
+    ex->step(0.01); eyy->step(0.01); ez->step(0.01);
+    erot->range(-360, 360); erot->step(1);
+    escl->range(0.001, 1000); escl->step(0.01);
+    ename->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    egrp->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    ex->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    eyy->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    ez->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    erot->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    escl->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+
+    Fl_Group *elight = new Fl_Group(W - PW, ey, PW, 168);
+    Fl_Box *lhdr = new Fl_Box(W - PW + 8, ey, PW - 16, 18, "Sphere light");
+    lhdr->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE); lhdr->labelfont(FL_HELVETICA_BOLD);
+    ey += 22;
+    Fl_Value_Input *elr   = new Fl_Value_Input(px, ey, pw, 22, "Red:");       ey += 26;
+    Fl_Value_Input *elg   = new Fl_Value_Input(px, ey, pw, 22, "Green:");     ey += 26;
+    Fl_Value_Input *elb   = new Fl_Value_Input(px, ey, pw, 22, "Blue:");      ey += 26;
+    Fl_Value_Input *eli   = new Fl_Value_Input(px, ey, pw, 22, "Intensity:"); ey += 26;
+    Fl_Value_Input *elrad = new Fl_Value_Input(px, ey, pw, 22, "Radius:");    ey += 26;
+    elr->range(0, 1); elg->range(0, 1); elb->range(0, 1);
+    elr->step(0.05); elg->step(0.05); elb->step(0.05);
+    eli->range(0, 100); eli->step(0.1);
+    elrad->range(0.1, 100); elrad->step(0.5);
+    elr->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    elg->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    elb->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    eli->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    elrad->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    elight->end();
+
+    entGroup->end();
+
+    faceGroup->hide(); vertGroup->hide(); entGroup->hide();  /* refreshPanel reveals one */
     panel->end();
     panel->resizable(NULL);
 
@@ -1605,6 +1770,19 @@ int main(int argc, char **argv)
     vx->callback(vertPosCb, view);
     vy->callback(vertPosCb, view);
     vz->callback(vertPosCb, view);
+
+    /* Wire the entity form (EM3). */
+    view->entGroup = entGroup; view->entLightGroup = elight; view->entTypeBox = etype;
+    view->entNameIn = ename; view->entGroupIn = egrp;
+    view->entXIn = ex; view->entYIn = eyy; view->entZIn = ez;
+    view->entRotIn = erot; view->entScaleIn = escl;
+    view->entLrIn = elr; view->entLgIn = elg; view->entLbIn = elb;
+    view->entLiIn = eli; view->entLradIn = elrad;
+    ename->callback(entFieldCb, view); egrp->callback(entFieldCb, view);
+    ex->callback(entFieldCb, view); eyy->callback(entFieldCb, view); ez->callback(entFieldCb, view);
+    erot->callback(entFieldCb, view); escl->callback(entFieldCb, view);
+    elr->callback(entFieldCb, view); elg->callback(entFieldCb, view); elb->callback(entFieldCb, view);
+    eli->callback(entFieldCb, view); elrad->callback(entFieldCb, view);
 
     /* Menu items (added after `view` exists for the Edit callbacks). Stash the
        Undo/Redo item indices so the view can grey them out when empty. */

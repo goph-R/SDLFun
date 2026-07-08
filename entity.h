@@ -26,7 +26,10 @@ enum EntityType {
     ENT_TRIGGER,
     ENT_DOOR,
     ENT_WAYPOINT,  /* Nav node; position-only, no mesh/physics. */
-    ENT_PATH_NODE  /* Platform path waypoint; grouped + ordered, position-only. */
+    ENT_PATH_NODE, /* Platform path waypoint; grouped + ordered, position-only. */
+    ENT_LIGHT      /* Sphere light; position-only + color/intensity/radius. The
+                      game runtime ignores it (like a waypoint); authored in the
+                      editor and consumed by the Blender lightmap bake. */
 };
 
 /* Path motion modes — stored as int in Entity.platform.moveType to keep
@@ -48,6 +51,15 @@ struct Entity {
     float posX, posY, posZ;
     float rotY;
     float scale;
+
+    /* Authored asset names (the mesh=/tex=/iqm=/anim= tokens, verbatim). The
+       loader resolves these into the loaded mesh/texture below and would
+       otherwise discard them; kept so the editor can show them in the property
+       form and re-emit them on .ent save. Empty = unset. */
+    char meshName[32];
+    char texName[32];
+    char iqmName[32];
+    char animName[32];
 
     /* Visual: static mesh (OBJ) */
     int hasMesh;
@@ -145,6 +157,12 @@ struct Entity {
         struct {
             int order;          /* sort key within the path group */
         } pathNode;
+
+        struct {
+            float r, g, b;      /* color, 0..1 */
+            float intensity;    /* scalar multiplier */
+            float radius;       /* sphere radius in metres */
+        } light;
     };
 };
 
@@ -289,6 +307,7 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
         else if (strcmp(tokens[0], "door") == 0) type = ENT_DOOR;
         else if (strcmp(tokens[0], "waypoint") == 0) type = ENT_WAYPOINT;
         else if (strcmp(tokens[0], "path_node") == 0) type = ENT_PATH_NODE;
+        else if (strcmp(tokens[0], "light") == 0) type = ENT_LIGHT;
         else { conLogf("entity: unknown type '%s'\n", tokens[0]); continue; }
 
         int idx = entCreate(el, type);
@@ -301,6 +320,11 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
         if (type == ENT_PLATFORM) {
             e->platform.enabled = 1;
             e->platform.dir = +1;
+        }
+        if (type == ENT_LIGHT) {           /* white / unit / 4 m unless overridden */
+            e->light.r = e->light.g = e->light.b = 1.0f;
+            e->light.intensity = 1.0f;
+            e->light.radius = 4.0f;
         }
 
         /* Name and group ("-" means none) */
@@ -325,10 +349,10 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
             char key[64], value[64];
             if (!entParseKV(tokens[i], key, value)) continue;
 
-            if (strcmp(key, "mesh") == 0) strncpy(meshPath, assetRegResolveModel(reg, value), 255);
-            else if (strcmp(key, "tex") == 0) strncpy(texPath, assetRegResolveTexture(reg, value), 255);
-            else if (strcmp(key, "iqm") == 0) strncpy(iqmPath, assetRegResolveModel(reg, value), 255);
-            else if (strcmp(key, "anim") == 0) strncpy(initAnim, value, 63);
+            if (strcmp(key, "mesh") == 0) { strncpy(meshPath, assetRegResolveModel(reg, value), 255); strncpy(e->meshName, value, 31); }
+            else if (strcmp(key, "tex") == 0) { strncpy(texPath, assetRegResolveTexture(reg, value), 255); strncpy(e->texName, value, 31); }
+            else if (strcmp(key, "iqm") == 0) { strncpy(iqmPath, assetRegResolveModel(reg, value), 255); strncpy(e->iqmName, value, 31); }
+            else if (strcmp(key, "anim") == 0) { strncpy(initAnim, value, 63); strncpy(e->animName, value, 31); }
             else if (strcmp(key, "scale") == 0) e->scale = (float)atof(value);
             else if (strcmp(key, "static") == 0) e->isStatic = atoi(value);
             else if (strcmp(key, "flip_cull") == 0) e->flipCull = atoi(value);
@@ -359,6 +383,11 @@ static int entLoadFile(EntityList *el, const char *filename, TexCache *cache,
             }
             else if (strcmp(key, "once") == 0) e->trigger.once = atoi(value);
             else if (strcmp(key, "order") == 0) e->pathNode.order = atoi(value);
+            /* Light keys */
+            else if (strcmp(key, "color") == 0)
+                sscanf(value, "%f,%f,%f", &e->light.r, &e->light.g, &e->light.b);
+            else if (strcmp(key, "intensity") == 0) e->light.intensity = (float)atof(value);
+            else if (strcmp(key, "radius") == 0) e->light.radius = (float)atof(value);
             else if (strcmp(key, "collide") == 0) {
                 if (strcmp(value, "box") == 0) e->collide = 1;
                 else if (strcmp(value, "trimesh") == 0) e->collide = 2;
