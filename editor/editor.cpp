@@ -47,6 +47,7 @@
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Menu_Bar.H>
 #include <FL/Fl_Choice.H>
+#include <FL/Fl_Check_Button.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Value_Input.H>
 #include <FL/Fl_Pixmap.H>
@@ -191,6 +192,17 @@ public:
     int             panelEnt;        /* the entity the form edits, or -1 */
     int             entEditPushed;   /* one undo push per entity-edit gesture */
 
+    /* EM3b: per-type field sub-groups (overlap; refreshEntPanel shows one). */
+    Fl_Group        *gItem, *gEnemy, *gPlatform, *gSwitch, *gTrigger, *gDoor, *gPath;
+    Fl_Choice       *itType;
+    Fl_Value_Input  *enHealth, *enSpeed, *enSight;
+    Fl_Input        *plPath;    Fl_Choice *plMove;    Fl_Value_Input *plSpeed;
+    Fl_Check_Button *plEnabled, *plFace;
+    Fl_Input        *swTarget;
+    Fl_Value_Input  *trSx, *trSy, *trSz;   Fl_Input *trTarget;   Fl_Check_Button *trOnce;
+    Fl_Choice       *drMotion, *drAxis;    Fl_Value_Input *drAmount, *drSpeed, *drAuto;
+    Fl_Value_Input  *paOrder;
+
     /* M2 grab (modal move): active while `grabbing`. The affected verts and
        their pre-grab positions are captured at start; the mouse delta
        (optionally axis-locked) moves them, snapped to 1 cm. */
@@ -223,6 +235,11 @@ public:
           entXIn(0), entYIn(0), entZIn(0), entRotIn(0), entScaleIn(0),
           entLrIn(0), entLgIn(0), entLbIn(0), entLiIn(0), entLradIn(0),
           panelEnt(-1), entEditPushed(0),
+          gItem(0), gEnemy(0), gPlatform(0), gSwitch(0), gTrigger(0), gDoor(0), gPath(0),
+          itType(0), enHealth(0), enSpeed(0), enSight(0),
+          plPath(0), plMove(0), plSpeed(0), plEnabled(0), plFace(0),
+          swTarget(0), trSx(0), trSy(0), trSz(0), trTarget(0), trOnce(0),
+          drMotion(0), drAxis(0), drAmount(0), drSpeed(0), drAuto(0), paOrder(0),
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
@@ -1301,8 +1318,17 @@ public:
         }
     }
 
-    /* Load the selected entity's fields into the form; reveal the light-only
-       sub-group for ENT_LIGHT. Resets the one-undo-per-gesture guard. */
+    void hideTypeGroups()
+    {
+        if (entLightGroup) entLightGroup->hide();
+        if (gItem) gItem->hide();         if (gEnemy) gEnemy->hide();
+        if (gPlatform) gPlatform->hide(); if (gSwitch) gSwitch->hide();
+        if (gTrigger) gTrigger->hide();   if (gDoor) gDoor->hide();
+        if (gPath) gPath->hide();
+    }
+
+    /* Load the selected entity's fields into the form and reveal the sub-group
+       matching its type. Resets the one-undo-per-gesture guard. */
     void refreshEntPanel(int ei)
     {
         panelEnt = ei;
@@ -1313,12 +1339,34 @@ public:
         entGroupIn->value(e->group);
         entXIn->value(e->posX); entYIn->value(e->posY); entZIn->value(e->posZ);
         entRotIn->value(e->rotY); entScaleIn->value(e->scale);
-        if (e->type == ENT_LIGHT) {
+        hideTypeGroups();
+        switch (e->type) {
+        case ENT_LIGHT:
             entLrIn->value(e->light.r); entLgIn->value(e->light.g); entLbIn->value(e->light.b);
             entLiIn->value(e->light.intensity); entLradIn->value(e->light.radius);
-            entLightGroup->show();
-        } else {
-            entLightGroup->hide();
+            entLightGroup->show(); break;
+        case ENT_ITEM:
+            itType->value(e->item.itemType); gItem->show(); break;
+        case ENT_ENEMY:
+            enHealth->value(e->enemy.health); enSpeed->value(e->enemy.speed);
+            enSight->value(e->enemy.sightRange); gEnemy->show(); break;
+        case ENT_PLATFORM:
+            plPath->value(e->platform.pathGroup); plMove->value(e->platform.moveType);
+            plSpeed->value(e->platform.speed); plEnabled->value(e->platform.enabled);
+            plFace->value(e->platform.facePath); gPlatform->show(); break;
+        case ENT_SWITCH:
+            swTarget->value(e->sw.target); gSwitch->show(); break;
+        case ENT_TRIGGER:
+            trSx->value(e->trigger.sizeX); trSy->value(e->trigger.sizeY);
+            trSz->value(e->trigger.sizeZ); trTarget->value(e->trigger.target);
+            trOnce->value(e->trigger.once); gTrigger->show(); break;
+        case ENT_DOOR:
+            drMotion->value(e->door.motion); drAxis->value(e->door.axis);
+            drAmount->value(e->door.amount); drSpeed->value(e->door.speed);
+            drAuto->value(e->door.autoCloseTime); gDoor->show(); break;
+        case ENT_PATH_NODE:
+            paOrder->value(e->pathNode.order); gPath->show(); break;
+        default: break;
         }
     }
 
@@ -1338,12 +1386,50 @@ public:
         e->posZ  = editSnap((float)entZIn->value());
         e->rotY  = (float)entRotIn->value();
         e->scale = (float)entScaleIn->value();
-        if (e->type == ENT_LIGHT) {
+        switch (e->type) {
+        case ENT_LIGHT:
             e->light.r = (float)entLrIn->value();
             e->light.g = (float)entLgIn->value();
             e->light.b = (float)entLbIn->value();
             e->light.intensity = (float)entLiIn->value();
             e->light.radius    = (float)entLradIn->value();
+            break;
+        case ENT_ITEM:
+            e->item.itemType = itType->value();
+            break;
+        case ENT_ENEMY:
+            e->enemy.health     = (int)enHealth->value();
+            e->enemy.speed      = (float)enSpeed->value();
+            e->enemy.sightRange = (float)enSight->value();
+            break;
+        case ENT_PLATFORM:
+            strncpy(e->platform.pathGroup, plPath->value(), 31); e->platform.pathGroup[31] = '\0';
+            e->platform.moveType = plMove->value();
+            e->platform.speed    = (float)plSpeed->value();
+            e->platform.enabled  = plEnabled->value();
+            e->platform.facePath = plFace->value();
+            break;
+        case ENT_SWITCH:
+            strncpy(e->sw.target, swTarget->value(), 31); e->sw.target[31] = '\0';
+            break;
+        case ENT_TRIGGER:
+            e->trigger.sizeX = (float)trSx->value();
+            e->trigger.sizeY = (float)trSy->value();
+            e->trigger.sizeZ = (float)trSz->value();
+            strncpy(e->trigger.target, trTarget->value(), 31); e->trigger.target[31] = '\0';
+            e->trigger.once = trOnce->value();
+            break;
+        case ENT_DOOR:
+            e->door.motion        = drMotion->value();
+            e->door.axis          = drAxis->value();
+            e->door.amount        = (float)drAmount->value();
+            e->door.speed         = (float)drSpeed->value();
+            e->door.autoCloseTime = (float)drAuto->value();
+            break;
+        case ENT_PATH_NODE:
+            e->pathNode.order = (int)paOrder->value();
+            break;
+        default: break;
         }
         updateMenuEnabled();
         redraw();
@@ -1612,6 +1698,14 @@ static void tilingCb   (Fl_Widget *, void *v) { ((EditorView *)v)->onTilingChang
 static void vertPosCb  (Fl_Widget *, void *v) { ((EditorView *)v)->onVertPosChanged(); }
 static void entFieldCb (Fl_Widget *, void *v) { ((EditorView *)v)->onEntChanged(); }
 
+/* Bold, left-aligned section header added to the currently-open group. */
+static void addPanelHeader(int x, int y, int w, const char *txt)
+{
+    Fl_Box *h = new Fl_Box(x, y, w, 18, txt);
+    h->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+    h->labelfont(FL_HELVETICA_BOLD);
+}
+
 int main(int argc, char **argv)
 {
     Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
@@ -1714,25 +1808,93 @@ int main(int argc, char **argv)
     erot->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
     escl->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
 
-    Fl_Group *elight = new Fl_Group(W - PW, ey, PW, 168);
-    Fl_Box *lhdr = new Fl_Box(W - PW + 8, ey, PW - 16, 18, "Sphere light");
-    lhdr->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE); lhdr->labelfont(FL_HELVETICA_BOLD);
-    ey += 22;
-    Fl_Value_Input *elr   = new Fl_Value_Input(px, ey, pw, 22, "Red:");       ey += 26;
-    Fl_Value_Input *elg   = new Fl_Value_Input(px, ey, pw, 22, "Green:");     ey += 26;
-    Fl_Value_Input *elb   = new Fl_Value_Input(px, ey, pw, 22, "Blue:");      ey += 26;
-    Fl_Value_Input *eli   = new Fl_Value_Input(px, ey, pw, 22, "Intensity:"); ey += 26;
-    Fl_Value_Input *elrad = new Fl_Value_Input(px, ey, pw, 22, "Radius:");    ey += 26;
-    elr->range(0, 1); elg->range(0, 1); elb->range(0, 1);
+    /* Type-specific sub-groups: all overlap the region below the common fields;
+       refreshEntPanel shows the one matching the entity's type. Fields sit at
+       absolute Y = ty + header(22) + row*26. Value fields commit live (changed/
+       enter); Fl_Choice/Fl_Check_Button fire their callback on change already. */
+    int ty = ey;
+    const int gh = 190, hx = W - PW + 8, hw = PW - 16;
+    const int wLive = FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY;
+
+    Fl_Group *elight = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Sphere light");
+    Fl_Value_Input *elr   = new Fl_Value_Input(px, ty + 22,  pw, 22, "Red:");
+    Fl_Value_Input *elg   = new Fl_Value_Input(px, ty + 48,  pw, 22, "Green:");
+    Fl_Value_Input *elb   = new Fl_Value_Input(px, ty + 74,  pw, 22, "Blue:");
+    Fl_Value_Input *eli   = new Fl_Value_Input(px, ty + 100, pw, 22, "Intensity:");
+    Fl_Value_Input *elrad = new Fl_Value_Input(px, ty + 126, pw, 22, "Radius:");
+    elr->range(0,1); elg->range(0,1); elb->range(0,1);
     elr->step(0.05); elg->step(0.05); elb->step(0.05);
-    eli->range(0, 100); eli->step(0.1);
-    elrad->range(0.1, 100); elrad->step(0.5);
-    elr->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
-    elg->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
-    elb->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
-    eli->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
-    elrad->when(FL_WHEN_CHANGED | FL_WHEN_ENTER_KEY);
+    eli->range(0,100); eli->step(0.1); elrad->range(0.1,100); elrad->step(0.5);
+    elr->when(wLive); elg->when(wLive); elb->when(wLive); eli->when(wLive); elrad->when(wLive);
     elight->end();
+
+    Fl_Group *gItem = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Item");
+    Fl_Choice *itType = new Fl_Choice(px, ty + 22, pw, 22, "Kind:");
+    itType->add("health"); itType->add("ammo"); itType->add("key");
+    gItem->end();
+
+    Fl_Group *gEnemy = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Enemy");
+    Fl_Value_Input *enHealth = new Fl_Value_Input(px, ty + 22, pw, 22, "Health:");
+    Fl_Value_Input *enSpeed  = new Fl_Value_Input(px, ty + 48, pw, 22, "Speed:");
+    Fl_Value_Input *enSight  = new Fl_Value_Input(px, ty + 74, pw, 22, "Sight:");
+    enHealth->range(0,10000); enHealth->step(1);
+    enSpeed->range(0,100); enSpeed->step(0.1); enSight->range(0,1000); enSight->step(0.5);
+    enHealth->when(wLive); enSpeed->when(wLive); enSight->when(wLive);
+    gEnemy->end();
+
+    Fl_Group *gPlatform = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Platform");
+    Fl_Input       *plPath  = new Fl_Input(px, ty + 22, pw, 22, "Path:");
+    Fl_Choice      *plMove  = new Fl_Choice(px, ty + 48, pw, 22, "Move:");
+    plMove->add("once"); plMove->add("ping_pong");
+    Fl_Value_Input *plSpeed = new Fl_Value_Input(px, ty + 74, pw, 22, "Speed:");
+    plSpeed->range(0,100); plSpeed->step(0.1);
+    Fl_Check_Button *plEnabled = new Fl_Check_Button(px, ty + 100, pw, 20, "Enabled");
+    Fl_Check_Button *plFace    = new Fl_Check_Button(px, ty + 122, pw, 20, "Face path");
+    plPath->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE); plSpeed->when(wLive);
+    gPlatform->end();
+
+    Fl_Group *gSwitch = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Switch");
+    Fl_Input *swTarget = new Fl_Input(px, ty + 22, pw, 22, "Target:");
+    swTarget->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    gSwitch->end();
+
+    Fl_Group *gTrigger = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Trigger");
+    Fl_Value_Input *trSx = new Fl_Value_Input(px, ty + 22, pw, 22, "Size X:");
+    Fl_Value_Input *trSy = new Fl_Value_Input(px, ty + 48, pw, 22, "Size Y:");
+    Fl_Value_Input *trSz = new Fl_Value_Input(px, ty + 74, pw, 22, "Size Z:");
+    Fl_Input       *trTarget = new Fl_Input(px, ty + 100, pw, 22, "Target:");
+    Fl_Check_Button *trOnce  = new Fl_Check_Button(px, ty + 126, pw, 20, "Once");
+    trSx->range(0,1000); trSy->range(0,1000); trSz->range(0,1000);
+    trSx->step(0.1); trSy->step(0.1); trSz->step(0.1);
+    trSx->when(wLive); trSy->when(wLive); trSz->when(wLive);
+    trTarget->when(FL_WHEN_ENTER_KEY | FL_WHEN_RELEASE);
+    gTrigger->end();
+
+    Fl_Group *gDoor = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Door");
+    Fl_Choice *drMotion = new Fl_Choice(px, ty + 22, pw, 22, "Motion:");
+    drMotion->add("slide"); drMotion->add("rotate");
+    Fl_Choice *drAxis = new Fl_Choice(px, ty + 48, pw, 22, "Axis:");
+    drAxis->add("X"); drAxis->add("Y"); drAxis->add("Z");
+    Fl_Value_Input *drAmount = new Fl_Value_Input(px, ty + 74,  pw, 22, "Amount:");
+    Fl_Value_Input *drSpeed  = new Fl_Value_Input(px, ty + 100, pw, 22, "Speed:");
+    Fl_Value_Input *drAuto   = new Fl_Value_Input(px, ty + 126, pw, 22, "Auto-close:");
+    drAmount->range(-360,360); drAmount->step(0.5);
+    drSpeed->range(0,1000); drSpeed->step(1); drAuto->range(0,600); drAuto->step(0.5);
+    drAmount->when(wLive); drSpeed->when(wLive); drAuto->when(wLive);
+    gDoor->end();
+
+    Fl_Group *gPath = new Fl_Group(W - PW, ty, PW, gh);
+    addPanelHeader(hx, ty, hw, "Path node");
+    Fl_Value_Input *paOrder = new Fl_Value_Input(px, ty + 22, pw, 22, "Order:");
+    paOrder->range(0,9999); paOrder->step(1); paOrder->when(wLive);
+    gPath->end();
 
     entGroup->end();
 
@@ -1783,6 +1945,28 @@ int main(int argc, char **argv)
     erot->callback(entFieldCb, view); escl->callback(entFieldCb, view);
     elr->callback(entFieldCb, view); elg->callback(entFieldCb, view); elb->callback(entFieldCb, view);
     eli->callback(entFieldCb, view); elrad->callback(entFieldCb, view);
+    view->gItem = gItem; view->gEnemy = gEnemy; view->gPlatform = gPlatform;
+    view->gSwitch = gSwitch; view->gTrigger = gTrigger; view->gDoor = gDoor; view->gPath = gPath;
+    view->itType = itType;
+    view->enHealth = enHealth; view->enSpeed = enSpeed; view->enSight = enSight;
+    view->plPath = plPath; view->plMove = plMove; view->plSpeed = plSpeed;
+    view->plEnabled = plEnabled; view->plFace = plFace;
+    view->swTarget = swTarget;
+    view->trSx = trSx; view->trSy = trSy; view->trSz = trSz;
+    view->trTarget = trTarget; view->trOnce = trOnce;
+    view->drMotion = drMotion; view->drAxis = drAxis;
+    view->drAmount = drAmount; view->drSpeed = drSpeed; view->drAuto = drAuto;
+    view->paOrder = paOrder;
+    itType->callback(entFieldCb, view);
+    enHealth->callback(entFieldCb, view); enSpeed->callback(entFieldCb, view); enSight->callback(entFieldCb, view);
+    plPath->callback(entFieldCb, view); plMove->callback(entFieldCb, view); plSpeed->callback(entFieldCb, view);
+    plEnabled->callback(entFieldCb, view); plFace->callback(entFieldCb, view);
+    swTarget->callback(entFieldCb, view);
+    trSx->callback(entFieldCb, view); trSy->callback(entFieldCb, view); trSz->callback(entFieldCb, view);
+    trTarget->callback(entFieldCb, view); trOnce->callback(entFieldCb, view);
+    drMotion->callback(entFieldCb, view); drAxis->callback(entFieldCb, view);
+    drAmount->callback(entFieldCb, view); drSpeed->callback(entFieldCb, view); drAuto->callback(entFieldCb, view);
+    paOrder->callback(entFieldCb, view);
 
     /* Menu items (added after `view` exists for the Edit callbacks). Stash the
        Undo/Redo item indices so the view can grey them out when empty. */
