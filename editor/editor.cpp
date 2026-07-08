@@ -106,6 +106,7 @@ static void conLogf(const char *fmt, ...)
 #include "edit_select.h"     /* vert/edge/face selection state                       */
 #include "edit_pick.h"       /* screen-space + ray picking (no GLU)                  */
 #include "edit_undo.h"       /* whole-mesh snapshot undo/redo                        */
+#include "edit_history.h"    /* unified mesh+entity tagged undo (supersedes above)   */
 #include "edit_ops.h"        /* extrude                                              */
 #include "edit_io.h"         /* save/load .lvl + OBJ/MTL export                      */
 
@@ -165,7 +166,7 @@ public:
        every topology edit. One flag per entity slot (index == identity). */
     unsigned char entSel[MAX_ENTITIES];
 
-    EditHistory   hist;         /* M2: snapshot undo/redo */
+    DocHistory    hist;         /* EM1: unified mesh + entity snapshot undo/redo */
     Fl_Menu_Bar  *menuBar;      /* Edit menu, for greying out Undo/Redo */
     int           undoIdx, redoIdx;
 
@@ -188,6 +189,7 @@ public:
     int  *grabVerts; Vec3 *grabOrig; int nGrab;
     int   suppressRelease;      /* skip the select on a grab-confirm click */
     int   grabFromExtrude;      /* grab launched by extrude (cancel = full undo) */
+    int   grabIsEnt;            /* EM1: grab is moving entities, not mesh verts */
 
     /* Free-fly camera: eye position + yaw/pitch (radians). */
     float camX, camY, camZ;
@@ -207,11 +209,12 @@ public:
           grabbing(0), grabAxis(-1),
           grabAnchorX(0), grabAnchorY(0), grabCurX(0), grabCurY(0),
           grabVerts(0), grabOrig(0), nGrab(0), suppressRelease(0), grabFromExtrude(0),
+          grabIsEnt(0),
           camX(0.0f), camY(2.0f), camZ(6.0f),
           yaw(-1.5708f), pitch(-0.15f), lastX(0), lastY(0)
     {
         mode(FL_RGB | FL_DEPTH | FL_DOUBLE);
-        editHistoryInit(&hist);
+        docHistInit(&hist);
         memset(entSel, 0, sizeof(entSel));
     }
 
@@ -671,7 +674,34 @@ public:
     {
         free(grabVerts); free(grabOrig);
         grabVerts = NULL; grabOrig = NULL;
-        nGrab = 0; grabbing = 0; grabAxis = -1; grabFromExtrude = 0;
+        nGrab = 0; grabbing = 0; grabAxis = -1; grabFromExtrude = 0; grabIsEnt = 0;
+    }
+
+    /* EM1: collect the selected entities' slot indices + pre-grab origins +
+       centroid into the shared grab arrays (grabVerts holds entity indices).
+       Returns the count (0 = nothing to grab). */
+    int grabGatherEnts()
+    {
+        if (!loaded || !scene.entities) return 0;
+        int nE = scene.entities->count, i, n = 0;
+        for (i = 0; i < nE; i++)
+            if (entSel[i] && scene.entities->entities[i].active) n++;
+        if (n == 0) return 0;
+
+        grabVerts = (int *)malloc(n * sizeof(int));
+        grabOrig  = (Vec3 *)malloc(n * sizeof(Vec3));
+        nGrab = 0;
+        Vec3 c = editV3(0, 0, 0);
+        for (i = 0; i < nE; i++) {
+            if (!entSel[i] || !scene.entities->entities[i].active) continue;
+            Entity *e = &scene.entities->entities[i];
+            grabVerts[nGrab] = i;
+            grabOrig[nGrab]  = editV3(e->posX, e->posY, e->posZ);
+            c = editV3Add(c, grabOrig[nGrab]);
+            nGrab++;
+        }
+        grabCentroid = editV3Scale(c, 1.0f / (float)nGrab);
+        return nGrab;
     }
 
     /* Anchor to the mouse and arm the modal move. The caller must have already
@@ -687,10 +717,19 @@ public:
 
     void grabStart()
     {
-        if (grabbing || !haveEmesh) return;
+        if (grabbing) return;
+        if (sel.mode == SEL_ENTITY) {
+            if (grabGatherEnts() == 0) { conLogf("grab: no entity selected\n"); return; }
+            docPushEnts(&hist, scene.entities);  /* pre-grab restore point */
+            grabIsEnt = 1; grabFromExtrude = 0;
+            grabBeginCommon();
+            conLogf("grab: %d entity(ies)\n", nGrab);
+            return;
+        }
+        if (!haveEmesh) return;
         if (grabGather() == 0) { conLogf("grab: nothing selected\n"); return; }
-        editHistoryPush(&hist, &emesh);          /* pre-grab restore point */
-        grabFromExtrude = 0;
+        docPushMesh(&hist, &emesh);              /* pre-grab restore point */
+        grabIsEnt = 0; grabFromExtrude = 0;
         grabBeginCommon();
         conLogf("grab: %d vert(s)\n", nGrab);
     }
@@ -712,6 +751,18 @@ public:
             Vec3 ax = grabAxisVec();
             delta = editV3Scale(ax, editV3Dot(delta, ax));
         }
+        if (grabIsEnt) {                          /* EM1: move entity origins */
+            for (int k = 0; k < nGrab; k++) {
+                Vec3 np = editV3Add(grabOrig[k], delta);
+                Entity *e = &scene.entities->entities[grabVerts[k]];
+                e->posX = editSnap(np.x);
+                e->posY = editSnap(np.y);
+                e->posZ = editSnap(np.z);
+            }
+            refreshPanel();
+            redraw();
+            return;
+        }
         for (int k = 0; k < nGrab; k++) {
             Vec3 np = editV3Add(grabOrig[k], delta);
             emesh.verts[grabVerts[k]].pos.x = editSnap(np.x);
@@ -730,15 +781,27 @@ public:
     {
         if (grabFromExtrude) {
             /* undo the whole extrude+move as one step (removes the new geometry) */
-            editHistoryPopRestore(&hist, &emesh);
+            docPopRestoreMesh(&hist, &emesh);
             grabEnd();
             afterTopologyEdit();
+            return;
+        }
+        if (grabIsEnt) {                          /* EM1: restore entity origins */
+            for (int k = 0; k < nGrab; k++) {
+                Entity *e = &scene.entities->entities[grabVerts[k]];
+                e->posX = grabOrig[k].x; e->posY = grabOrig[k].y; e->posZ = grabOrig[k].z;
+            }
+            docDropUndoTop(&hist);                /* back to pre-grab: drop it */
+            grabEnd();
+            updateMenuEnabled();
+            refreshPanel();
+            redraw();
             return;
         }
         for (int k = 0; k < nGrab; k++)
             emesh.verts[grabVerts[k]].pos = grabOrig[k];
         editMeshBuild(&emesh, &eobj);
-        editHistoryDropUndoTop(&hist);            /* back to pre-grab: drop it */
+        docDropUndoTop(&hist);                    /* back to pre-grab: drop it */
         grabEnd();
         updateMenuEnabled();
         refreshPanel();
@@ -767,14 +830,23 @@ public:
     {
         if (!menuBar || undoIdx < 0 || redoIdx < 0) return;
         Fl_Menu_Item *m = (Fl_Menu_Item *)menuBar->menu();
-        if (hist.nUndo > 0) m[undoIdx].activate(); else m[undoIdx].deactivate();
-        if (hist.nRedo > 0) m[redoIdx].activate(); else m[redoIdx].deactivate();
+        if (docHasUndo(&hist)) m[undoIdx].activate(); else m[undoIdx].deactivate();
+        if (docHasRedo(&hist)) m[redoIdx].activate(); else m[redoIdx].deactivate();
+    }
+
+    /* Reconcile whichever document a unified undo/redo just restored: mesh needs
+       a render rebuild + selection check; entities just need a repaint. */
+    void afterDocRestore(int kind)
+    {
+        if (kind == DOC_MESH)      afterRestore();
+        else if (kind == DOC_ENTS) { refreshPanel(); redraw(); }
     }
 
     /* Undo/redo entry points shared by the Ctrl+Z/Y keys and the Edit menu.
-       Disabled mid-grab (finish or cancel the grab first). */
-    void doUndo() { if (!grabbing && editHistoryUndo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
-    void doRedo() { if (!grabbing && editHistoryRedo(&hist, &emesh)) afterRestore(); updateMenuEnabled(); }
+       Disabled mid-grab (finish or cancel the grab first). One stack spans mesh
+       and entity edits, so Ctrl+Z always reverts the most recent of either. */
+    void doUndo() { if (!grabbing) afterDocRestore(docUndo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
+    void doRedo() { if (!grabbing) afterDocRestore(docRedo(&hist, &emesh, scene.entities)); updateMenuEnabled(); }
 
     /* ---- M3: make-face / flip / delete / add-primitive ------------------ */
 
@@ -840,7 +912,7 @@ public:
                     int ti = idx[b]; idx[b] = idx[b + 1]; idx[b + 1] = ti;
                 }
 
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         editAddFace(&emesh, idx[0], idx[1], idx[2], total == 4 ? idx[3] : -1,
                     emesh.numMats > 0 ? 0 : -1);
         afterTopologyEdit();
@@ -855,7 +927,7 @@ public:
         int n = 0, i;
         for (i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) n++;
         if (n == 0) { conLogf("flip: select faces (mode 3) first\n"); return; }
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         for (i = 0; i < emesh.numFaces; i++) if (sel.faceSel[i]) editFlipFace(&emesh, i);
         editMeshBuild(&emesh, &eobj);
         updateMenuEnabled();
@@ -903,7 +975,7 @@ public:
                     keepV[emesh.faces[i].v[j]] = 1;
         }
 
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         editMeshCompact(&emesh, keepV, keepF);
         free(keepV); free(keepF);
         afterTopologyEdit();
@@ -915,9 +987,9 @@ public:
     void recalcNormals()
     {
         if (grabbing || !haveEmesh) return;
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         int flips = editRecalcNormalsConsistent(&emesh);
-        if (flips == 0) { editHistoryDropUndoTop(&hist); conLogf("recalc normals: already consistent\n"); return; }
+        if (flips == 0) { docDropUndoTop(&hist); conLogf("recalc normals: already consistent\n"); return; }
         editMeshBuild(&emesh, &eobj);
         updateMenuEnabled();
         redraw();
@@ -929,9 +1001,9 @@ public:
     void mergeVerts()
     {
         if (grabbing || !haveEmesh) return;
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         int removed = editMergeByDistance(&emesh, EDIT_SNAP * 0.5f);
-        if (removed == 0) { editHistoryDropUndoTop(&hist); conLogf("merge: nothing to weld\n"); return; }
+        if (removed == 0) { docDropUndoTop(&hist); conLogf("merge: nothing to weld\n"); return; }
         afterTopologyEdit();
         conLogf("merge: welded %d vert(s)\n", removed);
     }
@@ -939,7 +1011,7 @@ public:
     void addCube()
     {
         if (grabbing || !haveEmesh) return;
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         Vec3 c = focusPoint();
         editAddCube(&emesh, c.x, c.y, c.z, 1.0f, 1.0f, 1.0f, emesh.numMats > 0 ? 0 : -1);
         afterTopologyEdit();
@@ -949,7 +1021,7 @@ public:
     void addPlane()
     {
         if (grabbing || !haveEmesh) return;
-        editHistoryPush(&hist, &emesh);
+        docPushMesh(&hist, &emesh);
         Vec3 c = focusPoint();
         float h = 1.0f;
         int matId = emesh.numMats > 0 ? 0 : -1;
@@ -969,7 +1041,7 @@ public:
         for (i = 0; i < nf; i++) if (sel.faceSel[i]) nsel++;
         if (nsel == 0) { conLogf("extrude: select faces (mode 3) first\n"); return; }
 
-        editHistoryPush(&hist, &emesh);          /* one snapshot for extrude+move */
+        docPushMesh(&hist, &emesh);          /* one snapshot for extrude+move */
 
         unsigned char *cap = (unsigned char *)malloc(nf);
         for (i = 0; i < nf; i++) cap[i] = sel.faceSel[i];
@@ -1091,7 +1163,7 @@ public:
     {
         if (panelVert < 0 || panelVert >= emesh.numVerts) return;
         /* Push undo once per gesture, so a live slide doesn't spam the stack. */
-        if (!vertEditPushed) { editHistoryPush(&hist, &emesh); vertEditPushed = 1; updateMenuEnabled(); }
+        if (!vertEditPushed) { docPushMesh(&hist, &emesh); vertEditPushed = 1; updateMenuEnabled(); }
         emesh.verts[panelVert].pos.x = editSnap((float)vxInput->value());
         emesh.verts[panelVert].pos.y = editSnap((float)vyInput->value());
         emesh.verts[panelVert].pos.z = editSnap((float)vzInput->value());
@@ -1161,7 +1233,7 @@ public:
     {
         const char *p = fl_file_chooser("Open Level (.lvl)", "*.lvl", 0);
         if (!p) return;
-        editHistoryPush(&hist, &emesh);          /* opening is undoable */
+        docPushMesh(&hist, &emesh);          /* opening is undoable */
         editMeshFree(&emesh);
         editLoadLvl(&emesh, p);
         editMeshBuild(&emesh, &eobj);
