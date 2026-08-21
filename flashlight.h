@@ -45,11 +45,12 @@
  *    - glTexSubImage2D: ~0.1ms for a 128x128 partial upload (any GPU)
  *    - Total per frame: ~0.3ms — trivial
  *
- *    The coarse pass that finds the affected box still walks every 4th texel
- *    of the WHOLE map each frame — ~16k samples striding through the 3MB
- *    worldPosMap, so nearly one cache miss apiece. That is the next thing to
- *    fix if the flashlight is still costing frames: seed the search from the
- *    previous box grown by how far the hit point moved.
+ *    Finding the affected box is a sphere test per acceleration-grid cell
+ *    (1024 cells at 512x512, 16KB contiguous) instead of a stride walk over
+ *    the 3MB worldPosMap. Do NOT try to predict the box from the previous
+ *    frame's: the lightmap is an atlas, so texels adjacent in the world can
+ *    live anywhere in UV, and a flashlight sweeping from wall to floor jumps
+ *    to an unrelated island.
  *
  * Memory:
  *    - worldPosMap: width * height * 3 * sizeof(float) = 3MB for 512x512
@@ -68,6 +69,11 @@
 #include "obj_loader.h"
 
 /* ---- Dynamic Lightmap ---- */
+
+/* Texels per side of one acceleration-grid cell. 16 keeps the grid small
+   enough to stay in cache (1024 cells at 512x512) while still being fine
+   enough that a lit cell is mostly lit texels. */
+#define DYNLM_BLOCK 16
 
 struct DynLightmap {
     /* Lightmap dimensions */
@@ -95,6 +101,16 @@ struct DynLightmap {
        hasPrev = 0 means nothing is dirty yet. */
     int hasPrev;
     int prevMinX, prevMinY, prevMaxX, prevMaxY;
+
+    /* Coarse acceleration grid, built once from worldPosMap. Each cell covers
+       DYNLM_BLOCK x DYNLM_BLOCK texels and stores the world-space bounding
+       sphere of the mapped texels inside it, so finding the lit region is a
+       sphere test per cell over a small contiguous array rather than a stride
+       walk through the 3MB worldPosMap. blockUsed = 0 for cells no triangle
+       reached. 16 bytes per cell -- 16KB for a 512x512 lightmap. */
+    int blocksX, blocksY;
+    float *blockSphere;          /* 4 floats per cell: centre xyz, radius */
+    unsigned char *blockUsed;
 };
 
 /* ---- UV-space triangle rasterizer (barycentric) ---- */
@@ -184,6 +200,69 @@ static void dynLmBuildWorldPosMap(DynLightmap *dl, ObjMesh *mesh)
 
 /* ---- Load lightmap with CPU pixel copy ---- */
 
+/* ---- Build the coarse acceleration grid from worldPosMap ---- */
+
+static void dynLmBuildBlockGrid(DynLightmap *dl)
+{
+    int w = dl->width, h = dl->height;
+
+    dl->blocksX = (w + DYNLM_BLOCK - 1) / DYNLM_BLOCK;
+    dl->blocksY = (h + DYNLM_BLOCK - 1) / DYNLM_BLOCK;
+
+    int cells = dl->blocksX * dl->blocksY;
+    dl->blockSphere = (float *)malloc(cells * 4 * sizeof(float));
+    dl->blockUsed = (unsigned char *)malloc(cells);
+
+    int mapped = 0;
+    for (int by = 0; by < dl->blocksY; by++) {
+        for (int bx = 0; bx < dl->blocksX; bx++) {
+            int cell = by * dl->blocksX + bx;
+
+            int x0 = bx * DYNLM_BLOCK, x1 = x0 + DYNLM_BLOCK;
+            int y0 = by * DYNLM_BLOCK, y1 = y0 + DYNLM_BLOCK;
+            if (x1 > w) x1 = w;
+            if (y1 > h) y1 = h;
+
+            float minX = FLT_MAX, minY = FLT_MAX, minZ = FLT_MAX;
+            float maxX = -FLT_MAX, maxY = -FLT_MAX, maxZ = -FLT_MAX;
+            int any = 0;
+
+            for (int y = y0; y < y1; y++) {
+                for (int x = x0; x < x1; x++) {
+                    int idx3 = (y * w + x) * 3;
+                    if (dl->worldPosMap[idx3] >= FLT_MAX * 0.5f) continue;
+                    float px = dl->worldPosMap[idx3 + 0];
+                    float py = dl->worldPosMap[idx3 + 1];
+                    float pz = dl->worldPosMap[idx3 + 2];
+                    if (px < minX) minX = px;
+                    if (py < minY) minY = py;
+                    if (pz < minZ) minZ = pz;
+                    if (px > maxX) maxX = px;
+                    if (py > maxY) maxY = py;
+                    if (pz > maxZ) maxZ = pz;
+                    any = 1;
+                }
+            }
+
+            dl->blockUsed[cell] = (unsigned char)any;
+            if (any) {
+                float cx = (minX + maxX) * 0.5f;
+                float cy = (minY + maxY) * 0.5f;
+                float cz = (minZ + maxZ) * 0.5f;
+                float ex = maxX - cx, ey = maxY - cy, ez = maxZ - cz;
+                dl->blockSphere[cell * 4 + 0] = cx;
+                dl->blockSphere[cell * 4 + 1] = cy;
+                dl->blockSphere[cell * 4 + 2] = cz;
+                dl->blockSphere[cell * 4 + 3] = sqrtf(ex * ex + ey * ey + ez * ez);
+                mapped++;
+            }
+        }
+    }
+
+    conLogf("flashlight: block grid %dx%d, %d of %d cells mapped\n",
+            dl->blocksX, dl->blocksY, mapped, cells);
+}
+
 static int dynLmInit(DynLightmap *dl, const char *lmPath, ObjMesh *mesh, GLuint existingTexID)
 {
     memset(dl, 0, sizeof(DynLightmap));
@@ -213,8 +292,10 @@ static int dynLmInit(DynLightmap *dl, const char *lmPath, ObjMesh *mesh, GLuint 
     /* Use existing GL texture (the one already loaded by the texture cache) */
     dl->texID = existingTexID;
 
-    /* Build the world position lookup from level mesh */
+    /* Build the world position lookup from level mesh, then the coarse grid
+       that indexes it (must come second -- it reads worldPosMap). */
     dynLmBuildWorldPosMap(dl, mesh);
+    dynLmBuildBlockGrid(dl);
 
     conLogf("flashlight: dynamic lightmap ready (%dx%d, tex=%u)\n",
            dl->width, dl->height, dl->texID);
@@ -244,27 +325,35 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
         }
     }
 
-    /* Only scan texels whose world position could be within radius.
-       Walk the worldPosMap in a coarse grid to find the UV-space bounding box
-       of the affected region, then scan only that box. */
+    /* Find the UV-space box the flashlight can reach, by testing each grid
+       cell's world-space bounding sphere against the flashlight sphere. A cell
+       can contribute only if the two overlap, so the test is exact -- unlike
+       the every-4th-texel walk this replaces, which sampled the whole 3MB
+       worldPosMap each frame (~16k near-certain cache misses at 512x512) and
+       could miss a UV island thinner than its stride outright.
+
+       Note the box cannot be predicted from the previous frame's: the lightmap
+       is an atlas, so texels adjacent in the world may sit anywhere in UV. */
     int scanMinX = w, scanMaxX = 0, scanMinY = h, scanMaxY = 0;
 
-    /* Coarse pass: check every 4th texel to find affected UV bounds */
-    for (int y = 0; y < h; y += 4) {
-        for (int x = 0; x < w; x += 4) {
-            int idx3 = (y * w + x) * 3;
-            if (dl->worldPosMap[idx3] >= FLT_MAX * 0.5f) continue;
-            float dx = dl->worldPosMap[idx3] - hitX;
-            float dy = dl->worldPosMap[idx3 + 1] - hitY;
-            float dz = dl->worldPosMap[idx3 + 2] - hitZ;
-            /* Use a larger search radius for the coarse pass (radius + margin) */
-            if (dx*dx + dy*dy + dz*dz < (radius + 2.0f) * (radius + 2.0f)) {
-                int x0 = x - 4, x1 = x + 4, y0 = y - 4, y1 = y + 4;
-                if (x0 < scanMinX) scanMinX = x0;
-                if (x1 > scanMaxX) scanMaxX = x1;
-                if (y0 < scanMinY) scanMinY = y0;
-                if (y1 > scanMaxY) scanMaxY = y1;
-            }
+    int cell = 0;
+    for (int by = 0; by < dl->blocksY; by++) {
+        for (int bx = 0; bx < dl->blocksX; bx++, cell++) {
+            if (!dl->blockUsed[cell]) continue;
+
+            const float *sphere = dl->blockSphere + cell * 4;
+            float dx = sphere[0] - hitX;
+            float dy = sphere[1] - hitY;
+            float dz = sphere[2] - hitZ;
+            float reach = radius + sphere[3];
+            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+
+            int x0 = bx * DYNLM_BLOCK, y0 = by * DYNLM_BLOCK;
+            int x1 = x0 + DYNLM_BLOCK - 1, y1 = y0 + DYNLM_BLOCK - 1;
+            if (x0 < scanMinX) scanMinX = x0;
+            if (x1 > scanMaxX) scanMaxX = x1;
+            if (y0 < scanMinY) scanMinY = y0;
+            if (y1 > scanMaxY) scanMaxY = y1;
         }
     }
 
@@ -391,6 +480,8 @@ static void dynLmFree(DynLightmap *dl)
     free(dl->bakedPixels);
     free(dl->workPixels);
     free(dl->worldPosMap);
+    free(dl->blockSphere);
+    free(dl->blockUsed);
     /* Don't delete texID — owned by texture cache */
     memset(dl, 0, sizeof(DynLightmap));
 }
