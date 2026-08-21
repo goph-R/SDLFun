@@ -373,6 +373,36 @@ MSG fl_msg;
 
 // A local helper function to flush any pending callback requests
 // from the awake ring-buffer
+
+/* LOCAL PATCH (SOOB, Win9x). FLTK 1.3 builds its windows with the Unicode
+   Win32 entry points -- RegisterClassExW, CreateWindowExW, DefWindowProcW and
+   the W message pump. Windows 95/98/ME implement those as stubs that simply
+   fail, so CreateWindowExW returns NULL and every window is invisible while
+   Fl_X still exists and shown() still reports 1. Downstream that surfaces as
+   GetDCEx(NULL,...) failing, no WM_PAINT, and Fl_Gl_Window never drawing.
+
+   The A and W entry points must be used consistently: the class registration,
+   the CreateWindowEx call, DefWindowProc and the message pump all have to
+   agree, or character messages are decoded with the wrong width. So each site
+   branches on the same runtime check rather than a compile-time one, which
+   keeps a single binary working on both 9x and NT.
+
+   Labels degrade to ANSI on 9x, which that platform could not have displayed
+   anyway. Re-apply if FLTK is upgraded. */
+static int fl_is_win9x(void)
+{
+  static int cached = -1;
+  if (cached < 0) {
+    OSVERSIONINFOA osv;
+    memset(&osv, 0, sizeof(osv));
+    osv.dwOSVersionInfoSize = sizeof(osv);
+    cached = (GetVersionExA(&osv) &&
+              osv.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS) ? 1 : 0;
+  }
+  return cached;
+}
+
+
 static void process_awake_handler_requests(void) {
   Fl_Awake_Handler func;
   void *data;
@@ -443,7 +473,9 @@ int fl_wait(double time_to_wait) {
 
   // Execute the message we got, and all other pending messages:
   // have_message = PeekMessage(&fl_msg, NULL, 0, 0, PM_REMOVE);
-  while ((have_message = PeekMessageW(&fl_msg, NULL, 0, 0, PM_REMOVE)) > 0) {
+  while ((have_message = fl_is_win9x()
+            ? PeekMessageA(&fl_msg, NULL, 0, 0, PM_REMOVE)
+            : PeekMessageW(&fl_msg, NULL, 0, 0, PM_REMOVE)) > 0) {
     if (fl_send_system_handlers(&fl_msg))
       continue;
 
@@ -458,7 +490,8 @@ int fl_wait(double time_to_wait) {
     }
 
     TranslateMessage(&fl_msg);
-    DispatchMessageW(&fl_msg);
+    if (fl_is_win9x()) DispatchMessageA(&fl_msg);
+    else               DispatchMessageW(&fl_msg);
   }
 
   // The following conditional test:
@@ -1318,7 +1351,9 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     // save the keysym until we figure out the characters:
     Fl::e_keysym = Fl::e_original_keysym = ms2fltk(wParam,lParam&(1<<24));
     // See if TranslateMessage turned it into a WM_*CHAR message:
-    if (PeekMessageW(&fl_msg, hWnd, WM_CHAR, WM_SYSDEADCHAR, PM_REMOVE))
+    if (fl_is_win9x()
+          ? PeekMessageA(&fl_msg, hWnd, WM_CHAR, WM_SYSDEADCHAR, PM_REMOVE)
+          : PeekMessageW(&fl_msg, hWnd, WM_CHAR, WM_SYSDEADCHAR, PM_REMOVE))
     {
       uMsg = fl_msg.message;
       wParam = fl_msg.wParam;
@@ -1543,6 +1578,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
   }
 
 
+  if (fl_is_win9x()) return DefWindowProcA(hWnd, uMsg, wParam, lParam);
   return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
@@ -1881,12 +1917,33 @@ Fl_X* Fl_X::make(Fl_Window* w) {
     wcw.hbrBackground = NULL;
     wcw.lpszMenuName = NULL;
     wcw.lpszClassName = class_namew;
-    RegisterClassExW(&wcw);
+    if (fl_is_win9x()) {
+      /* Same class, registered through the ANSI entry point. */
+      WNDCLASSEXA wca;
+      memset(&wca, 0, sizeof(wca));
+      wca.cbSize        = sizeof(WNDCLASSEXA);
+      wca.style         = wcw.style;
+      wca.lpfnWndProc   = wcw.lpfnWndProc;
+      wca.cbClsExtra    = wcw.cbClsExtra;
+      wca.cbWndExtra    = wcw.cbWndExtra;
+      wca.hInstance     = wcw.hInstance;
+      wca.hIcon         = wcw.hIcon;
+      wca.hIconSm       = wcw.hIconSm;
+      wca.hCursor       = wcw.hCursor;
+      wca.hbrBackground = wcw.hbrBackground;
+      wca.lpszMenuName  = NULL;
+      wca.lpszClassName = class_name;
+      RegisterClassExA(&wca);
+    } else {
+      RegisterClassExW(&wcw);
+    }
     class_name_list.add_name(class_name);
   }
 
   const wchar_t* message_namew = L"FLTK::ThreadWakeup";
-  if (!fl_wake_msg) fl_wake_msg = RegisterWindowMessageW(message_namew);
+  if (!fl_wake_msg) fl_wake_msg = fl_is_win9x()
+      ? RegisterWindowMessageA("FLTK::ThreadWakeup")
+      : RegisterWindowMessageW(message_namew);
 
   HWND parent;
   DWORD style = WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
@@ -1992,15 +2049,27 @@ Fl_X* Fl_X::make(Fl_Window* w) {
     wlen = fl_utf8toUtf16(w->label(), (unsigned) l, (unsigned short*)lab, wlen);
     lab[wlen] = 0;
   }
-  x->xid = CreateWindowExW(
-    styleEx,
-    class_namew, lab, style,
-    xp, yp, wp, hp,
-    parent,
-    NULL, // menu
-    fl_display,
-    NULL // creation parameters
-  );
+  if (fl_is_win9x()) {
+    x->xid = CreateWindowExA(
+      styleEx,
+      class_name, w->label() ? w->label() : "", style,
+      xp, yp, wp, hp,
+      parent,
+      NULL, // menu
+      fl_display,
+      NULL // creation parameters
+    );
+  } else {
+    x->xid = CreateWindowExW(
+      styleEx,
+      class_namew, lab, style,
+      xp, yp, wp, hp,
+      parent,
+      NULL, // menu
+      fl_display,
+      NULL // creation parameters
+    );
+  }
   if (lab) free(lab);
 
   x->next = Fl_X::first;
@@ -2225,7 +2294,8 @@ void Fl_Window::label(const char *name,const char *iname) {
     unsigned short * lab = (unsigned short*)malloc(sizeof(unsigned short)*wlen);
     wlen = fl_utf8toUtf16(name, (unsigned) l, lab, wlen);
     lab[wlen] = 0;
-    SetWindowTextW(i->xid, (WCHAR *)lab);
+    if (fl_is_win9x()) SetWindowTextA(i->xid, name);
+    else               SetWindowTextW(i->xid, (WCHAR *)lab);
     free(lab);
   }
 }

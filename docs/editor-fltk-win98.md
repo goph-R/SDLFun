@@ -135,10 +135,44 @@ like the game.
 - `game_session.h` — where `gameInit`/`gameFree` moved so `game.h` (the struct)
   can be included without the script/UI/audio runtime.
 
-## Local FLTK patch: GL context on Windows 9x
+## Local FLTK patch: Unicode window APIs on Windows 9x
 
-`vendor/fltk-1.3/FL/src/Fl_Gl_Choice.cxx` carries a one-line local patch. **Re-apply
-it if FLTK is ever upgraded.**
+**This is the one that matters. Re-apply it if FLTK is ever upgraded.**
+
+FLTK 1.3 creates its windows through the Unicode Win32 entry points:
+
+```c
+RegisterClassExW(&wcw);            // Fl_win32.cxx
+x->xid = CreateWindowExW(...);
+```
+
+Windows 95/98/ME implement those as stubs that fail. `CreateWindowExW` returns
+NULL, so `x->xid` is NULL — yet `Fl_X` still exists and `shown()` still returns 1,
+so nothing reports a problem. FLTK 1.3 effectively requires Windows 2000 or later.
+
+Everything observed on the Win98 box follows from that single fact:
+
+| Symptom | Cause |
+|---|---|
+| No window, no splash, no menu bar | HWND is NULL |
+| `draw()` never runs, so `bootstrap()` never runs | no HWND means no `WM_PAINT` |
+| `wglCreateContext` fails, `ERROR_INVALID_HANDLE` | `GetDCEx(NULL, ...)` returns NULL |
+| `Multitexture: not available` on an MX440 | there is no GL context |
+
+`fl_is_win9x()` in `Fl_win32.cxx` detects the platform once at runtime, and the
+window class registration, `CreateWindowEx`, `DefWindowProc`, `SetWindowText`,
+`RegisterWindowMessage` and the message pump each branch to their `A` variants on
+9x. The A and W entry points **must** be used consistently — a class registered
+with `RegisterClassExA` whose messages go to `DefWindowProcW` decodes characters
+at the wrong width. Detection is at runtime, not compile time, so one binary still
+works on NT. Window labels degrade to ANSI on 9x, which that platform could not
+have rendered anyway.
+
+## Local FLTK patch: GL device context (defensive)
+
+`vendor/fltk-1.3/FL/src/Fl_Gl_Choice.cxx` carries a one-line fallback. It is *not*
+what broke the editor — the Unicode issue above was — but it costs nothing and
+guards a genuinely fragile call.
 
 FLTK registers its window class with `CS_OWNDC` (`Fl_win32.cxx`). In
 `fl_create_gl_context` it then asks for a DC with:
@@ -152,13 +186,17 @@ Windows 95/98/ME it **fails and returns NULL**. FLTK never checks the result, so
 `SetPixelFormat` quietly failed on a NULL DC and `wglCreateContext` returned 0 with
 `GetLastError() == ERROR_INVALID_HANDLE` (6).
 
-The symptom was badly misleading: `Fl_Gl_Window::show()` responds to a missing
-context by calling `Fl::error("Insufficient GL support")` and returning **without
-creating the window** (`Fl_Gl_Window.cxx:77`). The editor therefore loaded the level
-and all its assets, logged `Multitexture: not available` on a card that plainly has
-it, showed no window at all, and then sat in `Fl::run()` redrawing a window that did
-not exist until the machine had to be restarted. `Fl::error` defaults to stderr and
-COMMAND.COM has no `2>&1`, so none of it reached a log file.
+Note the DC being NULL on Win98 was itself a *consequence* of the Unicode problem:
+`GetDCEx` was being handed a NULL `xid`. The fallback is kept only because
+`GetDCEx` with `DCX_CACHE` is documented as being ignored for a `CS_OWNDC` window
+and FLTK never checks the result.
+
+One FLTK behaviour is worth knowing when debugging this area: `Fl_Gl_Window::show()`
+answers a missing context by calling `Fl::error("Insufficient GL support")` and
+returning **without creating the window** (`Fl_Gl_Window.cxx:77`). `Fl::error`
+defaults to stderr, and COMMAND.COM has no `2>&1`, so that message can never reach a
+log file on Win98 — `editor.cpp` therefore routes `Fl::error`/`warning`/`fatal`
+through `conLogf`.
 
 The patch falls back to `GetDC`, which with `CS_OWNDC` returns the window's own
 private DC — the right DC for a long-lived GL context regardless:
@@ -176,9 +214,18 @@ diagnostic instead of hanging if the context is missing.
 `fltk98.bat` skips any source whose object already exists, so editing an FLTK file
 is not enough on its own. Delete the object and the build sentinel:
 
+`Fl_win32.cxx` is not compiled on its own — it is `#include`d by `Fl.cxx`, so
+editing it means deleting **`Fl.o`**, not `Fl_win32.o`:
+
 ```
+del vendor\fltk-1.3\FL\lib\o\Fl.o
 del vendor\fltk-1.3\FL\lib\og\Fl_Gl_Choice.o
 del vendor\fltk-1.3\FL\lib\fltkok.tag
 fltk98
 ed98
 ```
+
+`t98.bat` builds `editor/fltktest.cpp`, a small probe that shows a plain
+`Fl_Window` and an `Fl_Gl_Window` child and reports whether either paints. It is
+the quickest way to tell "FLTK cannot show a window" from "only GL is broken"
+without a full editor build.

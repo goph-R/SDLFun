@@ -120,7 +120,7 @@ Fl_Gl_Choice *Fl_Gl_Choice::find(int m, const int *alistp) {
 # define PFD_SUPPORT_COMPOSITION (0x8000)
 #endif
 
-#define DEBUG_PFD (1) // LOCAL (SOOB): on while the Win98 GL path is diagnosed; restore to 0 after
+#define DEBUG_PFD (0) // 1 = PFD selection debug output, 0 = no debug output
 
   // Replacement for ChoosePixelFormat() that finds one with an overlay
   // if possible:
@@ -270,38 +270,20 @@ GLContext fl_create_gl_context(Fl_Window* window, const Fl_Gl_Choice* g, int lay
   HDC hdc = i->private_dc;
   if (!hdc) {
     hdc = i->private_dc = GetDCEx(i->xid, 0, DCX_CACHE);
-    /* LOCAL PATCH (SOOB, Win98). FLTK registers its window class with
-       CS_OWNDC (Fl_win32.cxx). On Windows NT, GetDCEx then simply ignores
-       DCX_CACHE -- but on Windows 95/98/ME it FAILS and returns NULL. The
-       result was never checked, so SetPixelFormat quietly failed on a NULL
-       DC and wglCreateContext returned 0 with GetLastError() ==
-       ERROR_INVALID_HANDLE (6). The GL window ended up with no context, and
-       because Fl_Gl_Window::show() returns early in that case, no window
-       appeared at all. With CS_OWNDC the plain GetDC hands back the window's
-       own private DC, which is what a long-lived GL context wants anyway.
-       Re-apply this if FLTK is ever upgraded. */
+    /* LOCAL PATCH (SOOB, Win9x). Defensive: FLTK registers its window class
+       with CS_OWNDC (Fl_win32.cxx), and GetDCEx with DCX_CACHE is at best
+       ignored for such a window on NT and is unreliable on 9x. The result was
+       never checked, so a NULL here reached SetPixelFormat and wglCreateContext
+       silently. With CS_OWNDC, plain GetDC returns the window's own private DC,
+       which is what a long-lived GL context wants anyway.
+
+       NOTE: this is not what broke the Win98 editor -- that was the Unicode
+       window APIs in Fl_win32.cxx leaving xid NULL, so GetDCEx(NULL,...) failed
+       for a quite different reason. Kept because the check costs nothing.
+       Re-apply if FLTK is ever upgraded. */
     if (!hdc) hdc = i->private_dc = GetDC(i->xid);
     fl_save_dc(i->xid, hdc);
-    /* LOCAL PATCH 2 (SOOB, Win9x). g->pixelformat was enumerated against the
-       DESKTOP DC -- Fl_Gl_Choice::find does its DescribePixelFormat loop on
-       fl_GetDC(0). Windows only guarantees a pixel format index is meaningful
-       for the DC it came from; NT happens to agree across DCs, 95/98/ME need
-       not. The desktop index was rejected here, so SetPixelFormat failed and
-       wglCreateContext then returned 0 with GetLastError() ==
-       ERROR_INVALID_PIXEL_FORMAT (2000). Re-resolve the same descriptor
-       against the DC we are about to use. */
-    int soob_pf = ChoosePixelFormat(hdc, (PIXELFORMATDESCRIPTOR*)(&g->pfd));
-    if (!soob_pf) soob_pf = g->pixelformat;
-    if (!SetPixelFormat(hdc, soob_pf, (PIXELFORMATDESCRIPTOR*)(&g->pfd))) {
-      printf("FLTK/SOOB: SetPixelFormat(%d) failed, err=%lu"
-             " (desktop index was %d)\n",
-             soob_pf, (unsigned long)GetLastError(), g->pixelformat);
-      fflush(stdout);
-    } else {
-      printf("FLTK/SOOB: pixel format %d set on window DC"
-             " (desktop index was %d)\n", soob_pf, g->pixelformat);
-      fflush(stdout);
-    }
+    SetPixelFormat(hdc, g->pixelformat, (PIXELFORMATDESCRIPTOR*)(&g->pfd));
 #    if USE_COLORMAP
     if (fl_palette) SelectPalette(hdc, fl_palette, FALSE);
 #    endif
