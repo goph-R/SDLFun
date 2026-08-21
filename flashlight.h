@@ -111,6 +111,14 @@ struct DynLightmap {
     int blocksX, blocksY;
     float *blockSphere;          /* 4 floats per cell: centre xyz, radius */
     unsigned char *blockUsed;
+
+    /* Indices of the cells the flashlight lit, this frame and last. Work is
+       done per cell rather than over their bounding box: in an atlas the lit
+       islands can sit in opposite corners, so the box can cover most of the
+       texture while the lit area is a few thousand texels. Swapped, not
+       copied, at the end of each update. */
+    int *curCells, *prevCells;
+    int prevCellCount;
 };
 
 /* ---- UV-space triangle rasterizer (barycentric) ---- */
@@ -212,6 +220,9 @@ static void dynLmBuildBlockGrid(DynLightmap *dl)
     int cells = dl->blocksX * dl->blocksY;
     dl->blockSphere = (float *)malloc(cells * 4 * sizeof(float));
     dl->blockUsed = (unsigned char *)malloc(cells);
+    dl->curCells = (int *)malloc(cells * sizeof(int));
+    dl->prevCells = (int *)malloc(cells * sizeof(int));
+    dl->prevCellCount = 0;
 
     int mapped = 0;
     for (int by = 0; by < dl->blocksY; by++) {
@@ -314,13 +325,18 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
     float hitX = hit.x, hitY = hit.y, hitZ = hit.z;
     float colorR = color.x, colorG = color.y, colorB = color.z;
 
-    /* Undo the previous frame's light by copying back just the box it wrote.
-       Resetting the entire buffer here is a 768KB memcpy at 512x512, which
-       costs 1-2ms on a 350MHz PII -- far more than the lit region deserves. */
-    if (dl->hasPrev) {
-        int rowBytes = (dl->prevMaxX - dl->prevMinX + 1) * 3;
-        for (int y = dl->prevMinY; y <= dl->prevMaxY; y++) {
-            int off = (y * w + dl->prevMinX) * 3;
+    /* Undo the previous frame's light, cell by cell. Restoring its bounding
+       box instead would touch every texel between scattered islands. */
+    for (int i = 0; i < dl->prevCellCount; i++) {
+        int c = dl->prevCells[i];
+        int cbx = c % dl->blocksX, cby = c / dl->blocksX;
+        int rx0 = cbx * DYNLM_BLOCK, rx1 = rx0 + DYNLM_BLOCK;
+        int ry0 = cby * DYNLM_BLOCK, ry1 = ry0 + DYNLM_BLOCK;
+        if (rx1 > w) rx1 = w;
+        if (ry1 > h) ry1 = h;
+        int rowBytes = (rx1 - rx0) * 3;
+        for (int y = ry0; y < ry1; y++) {
+            int off = (y * w + rx0) * 3;
             memcpy(dl->workPixels + off, dl->bakedPixels + off, rowBytes);
         }
     }
@@ -336,6 +352,7 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
        is an atlas, so texels adjacent in the world may sit anywhere in UV. */
     int scanMinX = w, scanMaxX = 0, scanMinY = h, scanMaxY = 0;
 
+    int cellsHit = 0;
     int cell = 0;
     for (int by = 0; by < dl->blocksY; by++) {
         for (int bx = 0; bx < dl->blocksX; bx++, cell++) {
@@ -348,6 +365,7 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
             float reach = radius + sphere[3];
             if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
 
+            dl->curCells[cellsHit++] = cell;
             int x0 = bx * DYNLM_BLOCK, y0 = by * DYNLM_BLOCK;
             int x1 = x0 + DYNLM_BLOCK - 1, y1 = y0 + DYNLM_BLOCK - 1;
             if (x0 < scanMinX) scanMinX = x0;
@@ -360,29 +378,41 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
     if (scanMinX < 0) scanMinX = 0; if (scanMaxX >= w) scanMaxX = w - 1;
     if (scanMinY < 0) scanMinY = 0; if (scanMaxY >= h) scanMaxY = h - 1;
 
-    /* Fine pass: only scan the affected region */
-    for (int y = scanMinY; y <= scanMaxY; y++) {
-        for (int x = scanMinX; x <= scanMaxX; x++) {
-            int idx3 = (y * w + x) * 3;
+    /* Fine pass: walk only the lit cells. Walking the bounding box instead is
+       what kept this expensive -- at 512x512 a box spanning three scattered
+       islands is ~160k texels of sqrtf and 3MB-array reads per frame, which is
+       ~25ms on a 350MHz PII no matter how little of it is actually lit. */
+    for (int i = 0; i < cellsHit; i++) {
+        int c = dl->curCells[i];
+        int cbx = c % dl->blocksX, cby = c / dl->blocksX;
+        int fx0 = cbx * DYNLM_BLOCK, fx1 = fx0 + DYNLM_BLOCK;
+        int fy0 = cby * DYNLM_BLOCK, fy1 = fy0 + DYNLM_BLOCK;
+        if (fx1 > w) fx1 = w;
+        if (fy1 > h) fy1 = h;
 
-            if (dl->worldPosMap[idx3] >= FLT_MAX * 0.5f) continue;
+        for (int y = fy0; y < fy1; y++) {
+            for (int x = fx0; x < fx1; x++) {
+                int idx3 = (y * w + x) * 3;
 
-            float dx = dl->worldPosMap[idx3 + 0] - hitX;
-            float dy = dl->worldPosMap[idx3 + 1] - hitY;
-            float dz = dl->worldPosMap[idx3 + 2] - hitZ;
-            float distSq = dx * dx + dy * dy + dz * dz;
+                if (dl->worldPosMap[idx3] >= FLT_MAX * 0.5f) continue;
 
-            if (distSq < radiusSq) {
-                float dist = sqrtf(distSq);
-                float t = 1.0f - (dist / radius);
-                float atten = t * t * intensity;
+                float dx = dl->worldPosMap[idx3 + 0] - hitX;
+                float dy = dl->worldPosMap[idx3 + 1] - hitY;
+                float dz = dl->worldPosMap[idx3 + 2] - hitZ;
+                float distSq = dx * dx + dy * dy + dz * dz;
 
-                int r = dl->workPixels[idx3 + 0] + (int)(atten * colorR * 255.0f);
-                int g = dl->workPixels[idx3 + 1] + (int)(atten * colorG * 255.0f);
-                int b = dl->workPixels[idx3 + 2] + (int)(atten * colorB * 255.0f);
-                dl->workPixels[idx3 + 0] = (unsigned char)(r > 255 ? 255 : r);
-                dl->workPixels[idx3 + 1] = (unsigned char)(g > 255 ? 255 : g);
-                dl->workPixels[idx3 + 2] = (unsigned char)(b > 255 ? 255 : b);
+                if (distSq < radiusSq) {
+                    float dist = sqrtf(distSq);
+                    float t = 1.0f - (dist / radius);
+                    float atten = t * t * intensity;
+
+                    int r = dl->workPixels[idx3 + 0] + (int)(atten * colorR * 255.0f);
+                    int g = dl->workPixels[idx3 + 1] + (int)(atten * colorG * 255.0f);
+                    int b = dl->workPixels[idx3 + 2] + (int)(atten * colorB * 255.0f);
+                    dl->workPixels[idx3 + 0] = (unsigned char)(r > 255 ? 255 : r);
+                    dl->workPixels[idx3 + 1] = (unsigned char)(g > 255 ? 255 : g);
+                    dl->workPixels[idx3 + 2] = (unsigned char)(b > 255 ? 255 : b);
+                }
             }
         }
     }
@@ -430,6 +460,13 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     }
 
+    {   /* This frame's lit cells become next frame's restore list. */
+        int *swap = dl->prevCells;
+        dl->prevCells = dl->curCells;
+        dl->curCells = swap;
+        dl->prevCellCount = cellsHit;
+    }
+
     if (curValid) {
         dl->prevMinX = scanMinX; dl->prevMinY = scanMinY;
         dl->prevMaxX = scanMaxX; dl->prevMaxY = scanMaxY;
@@ -439,6 +476,24 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
     }
 
     dl->dirty = 1;
+
+    /* Diagnostic: how much of the atlas is the box actually covering? Cells
+       are 16x16 texels, so cellsHit*256 is the lit area; boxW*boxH is what the
+       fine pass above really walked. A large ratio between them means the lit
+       islands are scattered across the atlas and the single union box is the
+       wrong shape to describe them. */
+    {
+        static int reportTick = 0;
+        if (++reportTick >= 60) {
+            reportTick = 0;
+            int boxW = curValid ? (scanMaxX - scanMinX + 1) : 0;
+            int boxH = curValid ? (scanMaxY - scanMinY + 1) : 0;
+            conLogf("flashlight: box %dx%d = %d texels, %d cells lit "
+                    "(%d texels), waste %dx\n",
+                    boxW, boxH, boxW * boxH, cellsHit, cellsHit * 256,
+                    cellsHit ? (boxW * boxH) / (cellsHit * 256) : 0);
+        }
+    }
 }
 
 /* ---- Restore original lightmap (when flashlight turns off) ---- */
@@ -450,11 +505,19 @@ static void dynLmRestore(DynLightmap *dl)
     /* Only the last dirtied box differs from the baked lightmap, so restore
        that and leave the rest of the texture alone. */
     if (dl->hasPrev) {
-        int w = dl->width;
-        int rowBytes = (dl->prevMaxX - dl->prevMinX + 1) * 3;
-        for (int y = dl->prevMinY; y <= dl->prevMaxY; y++) {
-            int off = (y * w + dl->prevMinX) * 3;
-            memcpy(dl->workPixels + off, dl->bakedPixels + off, rowBytes);
+        int w = dl->width, h = dl->height;
+        for (int i = 0; i < dl->prevCellCount; i++) {
+            int c = dl->prevCells[i];
+            int cbx = c % dl->blocksX, cby = c / dl->blocksX;
+            int rx0 = cbx * DYNLM_BLOCK, rx1 = rx0 + DYNLM_BLOCK;
+            int ry0 = cby * DYNLM_BLOCK, ry1 = ry0 + DYNLM_BLOCK;
+            if (rx1 > w) rx1 = w;
+            if (ry1 > h) ry1 = h;
+            int rowBytes = (rx1 - rx0) * 3;
+            for (int y = ry0; y < ry1; y++) {
+                int off = (y * w + rx0) * 3;
+                memcpy(dl->workPixels + off, dl->bakedPixels + off, rowBytes);
+            }
         }
 
         glBindTexture(GL_TEXTURE_2D, dl->texID);
@@ -470,6 +533,7 @@ static void dynLmRestore(DynLightmap *dl)
     }
 
     dl->hasPrev = 0;
+    dl->prevCellCount = 0;
     dl->dirty = 0;
 }
 
@@ -482,6 +546,8 @@ static void dynLmFree(DynLightmap *dl)
     free(dl->worldPosMap);
     free(dl->blockSphere);
     free(dl->blockUsed);
+    free(dl->curCells);
+    free(dl->prevCells);
     /* Don't delete texID — owned by texture cache */
     memset(dl, 0, sizeof(DynLightmap));
 }
