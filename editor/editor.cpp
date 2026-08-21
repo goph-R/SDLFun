@@ -83,6 +83,10 @@ static void conLogf(const char *fmt, ...)
     va_start(ap, fmt);
     vfprintf(stdout, fmt, ap);
     va_end(ap);
+    /* Flush every line. Redirected stdout is block-buffered, so without this a
+       crash during startup discards the whole buffer and `SoobEditor > log.txt`
+       comes back empty -- which is exactly the case you most need it for. */
+    fflush(stdout);
 }
 
 /* Engine modules — struct field types first, then the shared render/load

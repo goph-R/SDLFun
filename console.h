@@ -90,6 +90,8 @@ static void conLogf(const char *fmt, ...)
     va_end(ap);
     buf[sizeof(buf) - 1] = '\0';
     fputs(buf, stdout);
+    fflush(stdout);   /* see editor.cpp: redirected stdout is block-buffered,
+                         so an early crash would otherwise lose the log */
     if (g_console) conPushLine(g_console, buf);
 }
 
