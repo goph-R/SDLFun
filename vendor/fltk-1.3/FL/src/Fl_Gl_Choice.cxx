@@ -17,6 +17,7 @@
 //
 
 #include <config.h>
+#include <stdio.h>   /* LOCAL (SOOB): DEBUG_PFD + patch diagnostics */
 #if HAVE_GL
 
 #  include <FL/Fl.H>
@@ -119,7 +120,7 @@ Fl_Gl_Choice *Fl_Gl_Choice::find(int m, const int *alistp) {
 # define PFD_SUPPORT_COMPOSITION (0x8000)
 #endif
 
-#define DEBUG_PFD (0) // 1 = PFD selection debug output, 0 = no debug output
+#define DEBUG_PFD (1) // LOCAL (SOOB): on while the Win98 GL path is diagnosed; restore to 0 after
 
   // Replacement for ChoosePixelFormat() that finds one with an overlay
   // if possible:
@@ -281,7 +282,26 @@ GLContext fl_create_gl_context(Fl_Window* window, const Fl_Gl_Choice* g, int lay
        Re-apply this if FLTK is ever upgraded. */
     if (!hdc) hdc = i->private_dc = GetDC(i->xid);
     fl_save_dc(i->xid, hdc);
-    SetPixelFormat(hdc, g->pixelformat, (PIXELFORMATDESCRIPTOR*)(&g->pfd));
+    /* LOCAL PATCH 2 (SOOB, Win9x). g->pixelformat was enumerated against the
+       DESKTOP DC -- Fl_Gl_Choice::find does its DescribePixelFormat loop on
+       fl_GetDC(0). Windows only guarantees a pixel format index is meaningful
+       for the DC it came from; NT happens to agree across DCs, 95/98/ME need
+       not. The desktop index was rejected here, so SetPixelFormat failed and
+       wglCreateContext then returned 0 with GetLastError() ==
+       ERROR_INVALID_PIXEL_FORMAT (2000). Re-resolve the same descriptor
+       against the DC we are about to use. */
+    int soob_pf = ChoosePixelFormat(hdc, (PIXELFORMATDESCRIPTOR*)(&g->pfd));
+    if (!soob_pf) soob_pf = g->pixelformat;
+    if (!SetPixelFormat(hdc, soob_pf, (PIXELFORMATDESCRIPTOR*)(&g->pfd))) {
+      printf("FLTK/SOOB: SetPixelFormat(%d) failed, err=%lu"
+             " (desktop index was %d)\n",
+             soob_pf, (unsigned long)GetLastError(), g->pixelformat);
+      fflush(stdout);
+    } else {
+      printf("FLTK/SOOB: pixel format %d set on window DC"
+             " (desktop index was %d)\n", soob_pf, g->pixelformat);
+      fflush(stdout);
+    }
 #    if USE_COLORMAP
     if (fl_palette) SelectPalette(hdc, fl_palette, FALSE);
 #    endif
