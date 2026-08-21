@@ -31,6 +31,12 @@ REM ---- Relative to the directory we just changed into: .. is FL, . is src.
 set CPLUS_INCLUDE_PATH=..;.
 set C_INCLUDE_PATH=..;.
 
+REM ---- Compiles are skipped when the object already exists, so a run
+REM ---- that dies late does not restart from zero. A skipped compile
+REM ---- leaves errorlevel untouched, so zero it first rather than
+REM ---- inheriting whatever ran before this batch.
+%DC%\ar.exe --version >nul
+
 REM ---- Objects live under FL\lib, which .gitignore already covers.
 if not exist ..\lib\nul mkdir ..\lib
 if not exist ..\lib\o\nul mkdir ..\lib\o
@@ -42,345 +48,345 @@ REM ---- the completed build is flagged with this 8.3-clean tag instead.
 if exist ..\lib\fltkok.tag goto done
 
 echo Compiling FLTK core - this takes a while...
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl.cxx -o ..\lib\o\Fl.o
+if not exist ..\lib\o\Fl.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl.cxx -o ..\lib\o\Fl.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Adjuster.cxx -o ..\lib\o\Fl_Adjuster.o
+if not exist ..\lib\o\Fl_Adjuster.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Adjuster.cxx -o ..\lib\o\Fl_Adjuster.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Bitmap.cxx -o ..\lib\o\Fl_Bitmap.o
+if not exist ..\lib\o\Fl_Bitmap.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Bitmap.cxx -o ..\lib\o\Fl_Bitmap.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser.cxx -o ..\lib\o\Fl_Browser.o
+if not exist ..\lib\o\Fl_Browser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser.cxx -o ..\lib\o\Fl_Browser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser_.cxx -o ..\lib\o\Fl_Browser_.o
+if not exist ..\lib\o\Fl_Browser_.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser_.cxx -o ..\lib\o\Fl_Browser_.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser_load.cxx -o ..\lib\o\Fl_Browser_load.o
+if not exist ..\lib\o\Fl_Browser_load.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Browser_load.cxx -o ..\lib\o\Fl_Browser_load.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Box.cxx -o ..\lib\o\Fl_Box.o
+if not exist ..\lib\o\Fl_Box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Box.cxx -o ..\lib\o\Fl_Box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Button.cxx -o ..\lib\o\Fl_Button.o
+if not exist ..\lib\o\Fl_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Button.cxx -o ..\lib\o\Fl_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Chart.cxx -o ..\lib\o\Fl_Chart.o
+if not exist ..\lib\o\Fl_Chart.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Chart.cxx -o ..\lib\o\Fl_Chart.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Check_Browser.cxx -o ..\lib\o\Fl_Check_Browser.o
+if not exist ..\lib\o\Fl_Check_Browser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Check_Browser.cxx -o ..\lib\o\Fl_Check_Browser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Check_Button.cxx -o ..\lib\o\Fl_Check_Button.o
+if not exist ..\lib\o\Fl_Check_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Check_Button.cxx -o ..\lib\o\Fl_Check_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Choice.cxx -o ..\lib\o\Fl_Choice.o
+if not exist ..\lib\o\Fl_Choice.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Choice.cxx -o ..\lib\o\Fl_Choice.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Clock.cxx -o ..\lib\o\Fl_Clock.o
+if not exist ..\lib\o\Fl_Clock.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Clock.cxx -o ..\lib\o\Fl_Clock.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Color_Chooser.cxx -o ..\lib\o\Fl_Color_Chooser.o
+if not exist ..\lib\o\Fl_Color_Chooser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Color_Chooser.cxx -o ..\lib\o\Fl_Color_Chooser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Copy_Surface.cxx -o ..\lib\o\Fl_Copy_Surface.o
+if not exist ..\lib\o\Fl_Copy_Surface.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Copy_Surface.cxx -o ..\lib\o\Fl_Copy_Surface.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Counter.cxx -o ..\lib\o\Fl_Counter.o
+if not exist ..\lib\o\Fl_Counter.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Counter.cxx -o ..\lib\o\Fl_Counter.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Dial.cxx -o ..\lib\o\Fl_Dial.o
+if not exist ..\lib\o\Fl_Dial.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Dial.cxx -o ..\lib\o\Fl_Dial.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Device.cxx -o ..\lib\o\Fl_Device.o
+if not exist ..\lib\o\Fl_Device.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Device.cxx -o ..\lib\o\Fl_Device.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Double_Window.cxx -o ..\lib\o\Fl_Double_Window.o
+if not exist ..\lib\o\Fl_Double_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Double_Window.cxx -o ..\lib\o\Fl_Double_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Browser.cxx -o ..\lib\o\Fl_File_Browser.o
+if not exist ..\lib\o\Fl_File_Browser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Browser.cxx -o ..\lib\o\Fl_File_Browser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Chooser.cxx -o ..\lib\o\Fl_File_Chooser.o
+if not exist ..\lib\o\Fl_File_Chooser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Chooser.cxx -o ..\lib\o\Fl_File_Chooser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Chooser2.cxx -o ..\lib\o\Fl_File_Chooser2.o
+if not exist ..\lib\o\Fl_File_Chooser2.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Chooser2.cxx -o ..\lib\o\Fl_File_Chooser2.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Icon.cxx -o ..\lib\o\Fl_File_Icon.o
+if not exist ..\lib\o\Fl_File_Icon.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Icon.cxx -o ..\lib\o\Fl_File_Icon.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Input.cxx -o ..\lib\o\Fl_File_Input.o
+if not exist ..\lib\o\Fl_File_Input.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_File_Input.cxx -o ..\lib\o\Fl_File_Input.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Group.cxx -o ..\lib\o\Fl_Group.o
+if not exist ..\lib\o\Fl_Group.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Group.cxx -o ..\lib\o\Fl_Group.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Help_View.cxx -o ..\lib\o\Fl_Help_View.o
+if not exist ..\lib\o\Fl_Help_View.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Help_View.cxx -o ..\lib\o\Fl_Help_View.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Image.cxx -o ..\lib\o\Fl_Image.o
+if not exist ..\lib\o\Fl_Image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Image.cxx -o ..\lib\o\Fl_Image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Image_Surface.cxx -o ..\lib\o\Fl_Image_Surface.o
+if not exist ..\lib\o\Fl_Image_Surface.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Image_Surface.cxx -o ..\lib\o\Fl_Image_Surface.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Input.cxx -o ..\lib\o\Fl_Input.o
+if not exist ..\lib\o\Fl_Input.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Input.cxx -o ..\lib\o\Fl_Input.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Input_.cxx -o ..\lib\o\Fl_Input_.o
+if not exist ..\lib\o\Fl_Input_.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Input_.cxx -o ..\lib\o\Fl_Input_.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Light_Button.cxx -o ..\lib\o\Fl_Light_Button.o
+if not exist ..\lib\o\Fl_Light_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Light_Button.cxx -o ..\lib\o\Fl_Light_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu.cxx -o ..\lib\o\Fl_Menu.o
+if not exist ..\lib\o\Fl_Menu.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu.cxx -o ..\lib\o\Fl_Menu.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_.cxx -o ..\lib\o\Fl_Menu_.o
+if not exist ..\lib\o\Fl_Menu_.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_.cxx -o ..\lib\o\Fl_Menu_.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Bar.cxx -o ..\lib\o\Fl_Menu_Bar.o
+if not exist ..\lib\o\Fl_Menu_Bar.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Bar.cxx -o ..\lib\o\Fl_Menu_Bar.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Button.cxx -o ..\lib\o\Fl_Menu_Button.o
+if not exist ..\lib\o\Fl_Menu_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Button.cxx -o ..\lib\o\Fl_Menu_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Window.cxx -o ..\lib\o\Fl_Menu_Window.o
+if not exist ..\lib\o\Fl_Menu_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_Window.cxx -o ..\lib\o\Fl_Menu_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_add.cxx -o ..\lib\o\Fl_Menu_add.o
+if not exist ..\lib\o\Fl_Menu_add.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_add.cxx -o ..\lib\o\Fl_Menu_add.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_global.cxx -o ..\lib\o\Fl_Menu_global.o
+if not exist ..\lib\o\Fl_Menu_global.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Menu_global.cxx -o ..\lib\o\Fl_Menu_global.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Multi_Label.cxx -o ..\lib\o\Fl_Multi_Label.o
+if not exist ..\lib\o\Fl_Multi_Label.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Multi_Label.cxx -o ..\lib\o\Fl_Multi_Label.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Native_File_Chooser.cxx -o ..\lib\o\Fl_Native_File_Chooser.o
+if not exist ..\lib\o\Fl_Native_File_Chooser.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Native_File_Chooser.cxx -o ..\lib\o\Fl_Native_File_Chooser.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Overlay_Window.cxx -o ..\lib\o\Fl_Overlay_Window.o
+if not exist ..\lib\o\Fl_Overlay_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Overlay_Window.cxx -o ..\lib\o\Fl_Overlay_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Pack.cxx -o ..\lib\o\Fl_Pack.o
+if not exist ..\lib\o\Fl_Pack.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Pack.cxx -o ..\lib\o\Fl_Pack.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Paged_Device.cxx -o ..\lib\o\Fl_Paged_Device.o
+if not exist ..\lib\o\Fl_Paged_Device.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Paged_Device.cxx -o ..\lib\o\Fl_Paged_Device.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Pixmap.cxx -o ..\lib\o\Fl_Pixmap.o
+if not exist ..\lib\o\Fl_Pixmap.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Pixmap.cxx -o ..\lib\o\Fl_Pixmap.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_PostScript.cxx -o ..\lib\o\Fl_PostScript.o
+if not exist ..\lib\o\Fl_PostScript.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_PostScript.cxx -o ..\lib\o\Fl_PostScript.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Positioner.cxx -o ..\lib\o\Fl_Positioner.o
+if not exist ..\lib\o\Fl_Positioner.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Positioner.cxx -o ..\lib\o\Fl_Positioner.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Preferences.cxx -o ..\lib\o\Fl_Preferences.o
+if not exist ..\lib\o\Fl_Preferences.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Preferences.cxx -o ..\lib\o\Fl_Preferences.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Printer.cxx -o ..\lib\o\Fl_Printer.o
+if not exist ..\lib\o\Fl_Printer.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Printer.cxx -o ..\lib\o\Fl_Printer.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Progress.cxx -o ..\lib\o\Fl_Progress.o
+if not exist ..\lib\o\Fl_Progress.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Progress.cxx -o ..\lib\o\Fl_Progress.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Repeat_Button.cxx -o ..\lib\o\Fl_Repeat_Button.o
+if not exist ..\lib\o\Fl_Repeat_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Repeat_Button.cxx -o ..\lib\o\Fl_Repeat_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Return_Button.cxx -o ..\lib\o\Fl_Return_Button.o
+if not exist ..\lib\o\Fl_Return_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Return_Button.cxx -o ..\lib\o\Fl_Return_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Roller.cxx -o ..\lib\o\Fl_Roller.o
+if not exist ..\lib\o\Fl_Roller.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Roller.cxx -o ..\lib\o\Fl_Roller.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Round_Button.cxx -o ..\lib\o\Fl_Round_Button.o
+if not exist ..\lib\o\Fl_Round_Button.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Round_Button.cxx -o ..\lib\o\Fl_Round_Button.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Scroll.cxx -o ..\lib\o\Fl_Scroll.o
+if not exist ..\lib\o\Fl_Scroll.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Scroll.cxx -o ..\lib\o\Fl_Scroll.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Scrollbar.cxx -o ..\lib\o\Fl_Scrollbar.o
+if not exist ..\lib\o\Fl_Scrollbar.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Scrollbar.cxx -o ..\lib\o\Fl_Scrollbar.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Shared_Image.cxx -o ..\lib\o\Fl_Shared_Image.o
+if not exist ..\lib\o\Fl_Shared_Image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Shared_Image.cxx -o ..\lib\o\Fl_Shared_Image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Single_Window.cxx -o ..\lib\o\Fl_Single_Window.o
+if not exist ..\lib\o\Fl_Single_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Single_Window.cxx -o ..\lib\o\Fl_Single_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Slider.cxx -o ..\lib\o\Fl_Slider.o
+if not exist ..\lib\o\Fl_Slider.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Slider.cxx -o ..\lib\o\Fl_Slider.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Table.cxx -o ..\lib\o\Fl_Table.o
+if not exist ..\lib\o\Fl_Table.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Table.cxx -o ..\lib\o\Fl_Table.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Table_Row.cxx -o ..\lib\o\Fl_Table_Row.o
+if not exist ..\lib\o\Fl_Table_Row.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Table_Row.cxx -o ..\lib\o\Fl_Table_Row.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tabs.cxx -o ..\lib\o\Fl_Tabs.o
+if not exist ..\lib\o\Fl_Tabs.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tabs.cxx -o ..\lib\o\Fl_Tabs.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Buffer.cxx -o ..\lib\o\Fl_Text_Buffer.o
+if not exist ..\lib\o\Fl_Text_Buffer.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Buffer.cxx -o ..\lib\o\Fl_Text_Buffer.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Display.cxx -o ..\lib\o\Fl_Text_Display.o
+if not exist ..\lib\o\Fl_Text_Display.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Display.cxx -o ..\lib\o\Fl_Text_Display.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Editor.cxx -o ..\lib\o\Fl_Text_Editor.o
+if not exist ..\lib\o\Fl_Text_Editor.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Text_Editor.cxx -o ..\lib\o\Fl_Text_Editor.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tile.cxx -o ..\lib\o\Fl_Tile.o
+if not exist ..\lib\o\Fl_Tile.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tile.cxx -o ..\lib\o\Fl_Tile.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tiled_Image.cxx -o ..\lib\o\Fl_Tiled_Image.o
+if not exist ..\lib\o\Fl_Tiled_Image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tiled_Image.cxx -o ..\lib\o\Fl_Tiled_Image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree.cxx -o ..\lib\o\Fl_Tree.o
+if not exist ..\lib\o\Fl_Tree.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree.cxx -o ..\lib\o\Fl_Tree.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Item.cxx -o ..\lib\o\Fl_Tree_Item.o
+if not exist ..\lib\o\Fl_Tree_Item.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Item.cxx -o ..\lib\o\Fl_Tree_Item.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Item_Array.cxx -o ..\lib\o\Fl_Tree_Item_Array.o
+if not exist ..\lib\o\Fl_Tree_Item_Array.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Item_Array.cxx -o ..\lib\o\Fl_Tree_Item_Array.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Prefs.cxx -o ..\lib\o\Fl_Tree_Prefs.o
+if not exist ..\lib\o\Fl_Tree_Prefs.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tree_Prefs.cxx -o ..\lib\o\Fl_Tree_Prefs.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tooltip.cxx -o ..\lib\o\Fl_Tooltip.o
+if not exist ..\lib\o\Fl_Tooltip.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Tooltip.cxx -o ..\lib\o\Fl_Tooltip.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Valuator.cxx -o ..\lib\o\Fl_Valuator.o
+if not exist ..\lib\o\Fl_Valuator.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Valuator.cxx -o ..\lib\o\Fl_Valuator.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Input.cxx -o ..\lib\o\Fl_Value_Input.o
+if not exist ..\lib\o\Fl_Value_Input.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Input.cxx -o ..\lib\o\Fl_Value_Input.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Output.cxx -o ..\lib\o\Fl_Value_Output.o
+if not exist ..\lib\o\Fl_Value_Output.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Output.cxx -o ..\lib\o\Fl_Value_Output.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Slider.cxx -o ..\lib\o\Fl_Value_Slider.o
+if not exist ..\lib\o\Fl_Value_Slider.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Value_Slider.cxx -o ..\lib\o\Fl_Value_Slider.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Widget.cxx -o ..\lib\o\Fl_Widget.o
+if not exist ..\lib\o\Fl_Widget.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Widget.cxx -o ..\lib\o\Fl_Widget.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window.cxx -o ..\lib\o\Fl_Window.o
+if not exist ..\lib\o\Fl_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window.cxx -o ..\lib\o\Fl_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_fullscreen.cxx -o ..\lib\o\Fl_Window_fullscreen.o
+if not exist ..\lib\o\Fl_Window_fullscreen.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_fullscreen.cxx -o ..\lib\o\Fl_Window_fullscreen.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_hotspot.cxx -o ..\lib\o\Fl_Window_hotspot.o
+if not exist ..\lib\o\Fl_Window_hotspot.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_hotspot.cxx -o ..\lib\o\Fl_Window_hotspot.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_iconize.cxx -o ..\lib\o\Fl_Window_iconize.o
+if not exist ..\lib\o\Fl_Window_iconize.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_iconize.cxx -o ..\lib\o\Fl_Window_iconize.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_shape.cxx -o ..\lib\o\Fl_Window_shape.o
+if not exist ..\lib\o\Fl_Window_shape.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Window_shape.cxx -o ..\lib\o\Fl_Window_shape.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Wizard.cxx -o ..\lib\o\Fl_Wizard.o
+if not exist ..\lib\o\Fl_Wizard.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Wizard.cxx -o ..\lib\o\Fl_Wizard.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_XBM_Image.cxx -o ..\lib\o\Fl_XBM_Image.o
+if not exist ..\lib\o\Fl_XBM_Image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_XBM_Image.cxx -o ..\lib\o\Fl_XBM_Image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_XPM_Image.cxx -o ..\lib\o\Fl_XPM_Image.o
+if not exist ..\lib\o\Fl_XPM_Image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_XPM_Image.cxx -o ..\lib\o\Fl_XPM_Image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_abort.cxx -o ..\lib\o\Fl_abort.o
+if not exist ..\lib\o\Fl_abort.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_abort.cxx -o ..\lib\o\Fl_abort.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_add_idle.cxx -o ..\lib\o\Fl_add_idle.o
+if not exist ..\lib\o\Fl_add_idle.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_add_idle.cxx -o ..\lib\o\Fl_add_idle.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_arg.cxx -o ..\lib\o\Fl_arg.o
+if not exist ..\lib\o\Fl_arg.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_arg.cxx -o ..\lib\o\Fl_arg.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_compose.cxx -o ..\lib\o\Fl_compose.o
+if not exist ..\lib\o\Fl_compose.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_compose.cxx -o ..\lib\o\Fl_compose.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_display.cxx -o ..\lib\o\Fl_display.o
+if not exist ..\lib\o\Fl_display.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_display.cxx -o ..\lib\o\Fl_display.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_get_key.cxx -o ..\lib\o\Fl_get_key.o
+if not exist ..\lib\o\Fl_get_key.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_get_key.cxx -o ..\lib\o\Fl_get_key.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_get_system_colors.cxx -o ..\lib\o\Fl_get_system_colors.o
+if not exist ..\lib\o\Fl_get_system_colors.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_get_system_colors.cxx -o ..\lib\o\Fl_get_system_colors.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_grab.cxx -o ..\lib\o\Fl_grab.o
+if not exist ..\lib\o\Fl_grab.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_grab.cxx -o ..\lib\o\Fl_grab.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_lock.cxx -o ..\lib\o\Fl_lock.o
+if not exist ..\lib\o\Fl_lock.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_lock.cxx -o ..\lib\o\Fl_lock.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_own_colormap.cxx -o ..\lib\o\Fl_own_colormap.o
+if not exist ..\lib\o\Fl_own_colormap.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_own_colormap.cxx -o ..\lib\o\Fl_own_colormap.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_visual.cxx -o ..\lib\o\Fl_visual.o
+if not exist ..\lib\o\Fl_visual.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_visual.cxx -o ..\lib\o\Fl_visual.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_x.cxx -o ..\lib\o\Fl_x.o
+if not exist ..\lib\o\Fl_x.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_x.cxx -o ..\lib\o\Fl_x.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_absolute.cxx -o ..\lib\o\filename_absolute.o
+if not exist ..\lib\o\filename_absolute.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_absolute.cxx -o ..\lib\o\filename_absolute.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_expand.cxx -o ..\lib\o\filename_expand.o
+if not exist ..\lib\o\filename_expand.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_expand.cxx -o ..\lib\o\filename_expand.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_ext.cxx -o ..\lib\o\filename_ext.o
+if not exist ..\lib\o\filename_ext.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_ext.cxx -o ..\lib\o\filename_ext.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_isdir.cxx -o ..\lib\o\filename_isdir.o
+if not exist ..\lib\o\filename_isdir.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_isdir.cxx -o ..\lib\o\filename_isdir.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_list.cxx -o ..\lib\o\filename_list.o
+if not exist ..\lib\o\filename_list.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_list.cxx -o ..\lib\o\filename_list.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_match.cxx -o ..\lib\o\filename_match.o
+if not exist ..\lib\o\filename_match.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_match.cxx -o ..\lib\o\filename_match.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c filename_setext.cxx -o ..\lib\o\filename_setext.o
+if not exist ..\lib\o\filename_setext.o %DC%\g++.exe -O2 -w -include ..\w98.h -c filename_setext.cxx -o ..\lib\o\filename_setext.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_arc.cxx -o ..\lib\o\fl_arc.o
+if not exist ..\lib\o\fl_arc.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_arc.cxx -o ..\lib\o\fl_arc.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_arci.cxx -o ..\lib\o\fl_arci.o
+if not exist ..\lib\o\fl_arci.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_arci.cxx -o ..\lib\o\fl_arci.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_ask.cxx -o ..\lib\o\fl_ask.o
+if not exist ..\lib\o\fl_ask.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_ask.cxx -o ..\lib\o\fl_ask.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_boxtype.cxx -o ..\lib\o\fl_boxtype.o
+if not exist ..\lib\o\fl_boxtype.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_boxtype.cxx -o ..\lib\o\fl_boxtype.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_color.cxx -o ..\lib\o\fl_color.o
+if not exist ..\lib\o\fl_color.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_color.cxx -o ..\lib\o\fl_color.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_cursor.cxx -o ..\lib\o\fl_cursor.o
+if not exist ..\lib\o\fl_cursor.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_cursor.cxx -o ..\lib\o\fl_cursor.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_curve.cxx -o ..\lib\o\fl_curve.o
+if not exist ..\lib\o\fl_curve.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_curve.cxx -o ..\lib\o\fl_curve.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_diamond_box.cxx -o ..\lib\o\fl_diamond_box.o
+if not exist ..\lib\o\fl_diamond_box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_diamond_box.cxx -o ..\lib\o\fl_diamond_box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_dnd.cxx -o ..\lib\o\fl_dnd.o
+if not exist ..\lib\o\fl_dnd.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_dnd.cxx -o ..\lib\o\fl_dnd.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw.cxx -o ..\lib\o\fl_draw.o
+if not exist ..\lib\o\fl_draw.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw.cxx -o ..\lib\o\fl_draw.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw_image.cxx -o ..\lib\o\fl_draw_image.o
+if not exist ..\lib\o\fl_draw_image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw_image.cxx -o ..\lib\o\fl_draw_image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw_pixmap.cxx -o ..\lib\o\fl_draw_pixmap.o
+if not exist ..\lib\o\fl_draw_pixmap.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_draw_pixmap.cxx -o ..\lib\o\fl_draw_pixmap.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_encoding_latin1.cxx -o ..\lib\o\fl_encoding_latin1.o
+if not exist ..\lib\o\fl_encoding_latin1.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_encoding_latin1.cxx -o ..\lib\o\fl_encoding_latin1.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_encoding_mac_roman.cxx -o ..\lib\o\fl_encoding_mac_roman.o
+if not exist ..\lib\o\fl_encoding_mac_roman.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_encoding_mac_roman.cxx -o ..\lib\o\fl_encoding_mac_roman.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_engraved_label.cxx -o ..\lib\o\fl_engraved_label.o
+if not exist ..\lib\o\fl_engraved_label.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_engraved_label.cxx -o ..\lib\o\fl_engraved_label.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_file_dir.cxx -o ..\lib\o\fl_file_dir.o
+if not exist ..\lib\o\fl_file_dir.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_file_dir.cxx -o ..\lib\o\fl_file_dir.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_font.cxx -o ..\lib\o\fl_font.o
+if not exist ..\lib\o\fl_font.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_font.cxx -o ..\lib\o\fl_font.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_gleam.cxx -o ..\lib\o\fl_gleam.o
+if not exist ..\lib\o\fl_gleam.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_gleam.cxx -o ..\lib\o\fl_gleam.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_gtk.cxx -o ..\lib\o\fl_gtk.o
+if not exist ..\lib\o\fl_gtk.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_gtk.cxx -o ..\lib\o\fl_gtk.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_labeltype.cxx -o ..\lib\o\fl_labeltype.o
+if not exist ..\lib\o\fl_labeltype.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_labeltype.cxx -o ..\lib\o\fl_labeltype.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_line_style.cxx -o ..\lib\o\fl_line_style.o
+if not exist ..\lib\o\fl_line_style.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_line_style.cxx -o ..\lib\o\fl_line_style.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_open_uri.cxx -o ..\lib\o\fl_open_uri.o
+if not exist ..\lib\o\fl_open_uri.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_open_uri.cxx -o ..\lib\o\fl_open_uri.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_oval_box.cxx -o ..\lib\o\fl_oval_box.o
+if not exist ..\lib\o\fl_oval_box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_oval_box.cxx -o ..\lib\o\fl_oval_box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_overlay.cxx -o ..\lib\o\fl_overlay.o
+if not exist ..\lib\o\fl_overlay.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_overlay.cxx -o ..\lib\o\fl_overlay.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_overlay_visual.cxx -o ..\lib\o\fl_overlay_visual.o
+if not exist ..\lib\o\fl_overlay_visual.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_overlay_visual.cxx -o ..\lib\o\fl_overlay_visual.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_plastic.cxx -o ..\lib\o\fl_plastic.o
+if not exist ..\lib\o\fl_plastic.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_plastic.cxx -o ..\lib\o\fl_plastic.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_read_image.cxx -o ..\lib\o\fl_read_image.o
+if not exist ..\lib\o\fl_read_image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_read_image.cxx -o ..\lib\o\fl_read_image.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_rect.cxx -o ..\lib\o\fl_rect.o
+if not exist ..\lib\o\fl_rect.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_rect.cxx -o ..\lib\o\fl_rect.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_round_box.cxx -o ..\lib\o\fl_round_box.o
+if not exist ..\lib\o\fl_round_box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_round_box.cxx -o ..\lib\o\fl_round_box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_rounded_box.cxx -o ..\lib\o\fl_rounded_box.o
+if not exist ..\lib\o\fl_rounded_box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_rounded_box.cxx -o ..\lib\o\fl_rounded_box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_set_font.cxx -o ..\lib\o\fl_set_font.o
+if not exist ..\lib\o\fl_set_font.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_set_font.cxx -o ..\lib\o\fl_set_font.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_set_fonts.cxx -o ..\lib\o\fl_set_fonts.o
+if not exist ..\lib\o\fl_set_fonts.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_set_fonts.cxx -o ..\lib\o\fl_set_fonts.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_scroll_area.cxx -o ..\lib\o\fl_scroll_area.o
+if not exist ..\lib\o\fl_scroll_area.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_scroll_area.cxx -o ..\lib\o\fl_scroll_area.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_shadow_box.cxx -o ..\lib\o\fl_shadow_box.o
+if not exist ..\lib\o\fl_shadow_box.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_shadow_box.cxx -o ..\lib\o\fl_shadow_box.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_shortcut.cxx -o ..\lib\o\fl_shortcut.o
+if not exist ..\lib\o\fl_shortcut.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_shortcut.cxx -o ..\lib\o\fl_shortcut.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_show_colormap.cxx -o ..\lib\o\fl_show_colormap.o
+if not exist ..\lib\o\fl_show_colormap.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_show_colormap.cxx -o ..\lib\o\fl_show_colormap.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_symbols.cxx -o ..\lib\o\fl_symbols.o
+if not exist ..\lib\o\fl_symbols.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_symbols.cxx -o ..\lib\o\fl_symbols.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_vertex.cxx -o ..\lib\o\fl_vertex.o
+if not exist ..\lib\o\fl_vertex.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_vertex.cxx -o ..\lib\o\fl_vertex.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c screen_xywh.cxx -o ..\lib\o\screen_xywh.o
+if not exist ..\lib\o\screen_xywh.o %DC%\g++.exe -O2 -w -include ..\w98.h -c screen_xywh.cxx -o ..\lib\o\screen_xywh.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c fl_utf8.cxx -o ..\lib\o\fl_utf8.o
+if not exist ..\lib\o\fl_utf8.o %DC%\g++.exe -O2 -w -include ..\w98.h -c fl_utf8.cxx -o ..\lib\o\fl_utf8.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c ps_image.cxx -o ..\lib\o\ps_image.o
+if not exist ..\lib\o\ps_image.o %DC%\g++.exe -O2 -w -include ..\w98.h -c ps_image.cxx -o ..\lib\o\ps_image.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c fl_call_main.c -o ..\lib\o\fl_call_main.o
+if not exist ..\lib\o\fl_call_main.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c fl_call_main.c -o ..\lib\o\fl_call_main.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c flstring.c -o ..\lib\o\flstring.o
+if not exist ..\lib\o\flstring.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c flstring.c -o ..\lib\o\flstring.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c scandir.c -o ..\lib\o\scandir.o
+if not exist ..\lib\o\scandir.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c scandir.c -o ..\lib\o\scandir.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c numericsort.c -o ..\lib\o\numericsort.o
+if not exist ..\lib\o\numericsort.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c numericsort.c -o ..\lib\o\numericsort.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c vsnprintf.c -o ..\lib\o\vsnprintf.o
+if not exist ..\lib\o\vsnprintf.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c vsnprintf.c -o ..\lib\o\vsnprintf.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c fl_utf.c -o ..\lib\o\fl_utf.o
+if not exist ..\lib\o\fl_utf.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c fl_utf.c -o ..\lib\o\fl_utf.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/case.c -o ..\lib\o\xutf8/case.o
+if not exist ..\lib\o\case.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\case.c -o ..\lib\o\case.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/is_right2left.c -o ..\lib\o\xutf8/is_right2left.o
+if not exist ..\lib\o\is_right2left.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\is_right2left.c -o ..\lib\o\is_right2left.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/is_spacing.c -o ..\lib\o\xutf8/is_spacing.o
+if not exist ..\lib\o\is_spacing.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\is_spacing.c -o ..\lib\o\is_spacing.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/keysym2Ucs.c -o ..\lib\o\xutf8/keysym2Ucs.o
+if not exist ..\lib\o\keysym2Ucs.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\keysym2Ucs.c -o ..\lib\o\keysym2Ucs.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/utf8Input.c -o ..\lib\o\xutf8/utf8Input.o
+if not exist ..\lib\o\utf8Input.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\utf8Input.c -o ..\lib\o\utf8Input.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/utf8Utils.c -o ..\lib\o\xutf8/utf8Utils.o
+if not exist ..\lib\o\utf8Utils.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\utf8Utils.c -o ..\lib\o\utf8Utils.o
 if errorlevel 1 goto failed
-%DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8/utf8Wrap.c -o ..\lib\o\xutf8/utf8Wrap.o
+if not exist ..\lib\o\utf8Wrap.o %DC%\gcc.exe -O2 -w -include ..\w98.h -c xutf8\utf8Wrap.c -o ..\lib\o\utf8Wrap.o
 if errorlevel 1 goto failed
 
 echo Compiling FLTK GL - this takes a while...
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Choice.cxx -o ..\lib\og\Fl_Gl_Choice.o
+if not exist ..\lib\og\Fl_Gl_Choice.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Choice.cxx -o ..\lib\og\Fl_Gl_Choice.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Overlay.cxx -o ..\lib\og\Fl_Gl_Overlay.o
+if not exist ..\lib\og\Fl_Gl_Overlay.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Overlay.cxx -o ..\lib\og\Fl_Gl_Overlay.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Device_Plugin.cxx -o ..\lib\og\Fl_Gl_Device_Plugin.o
+if not exist ..\lib\og\Fl_Gl_Device_Plugin.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Device_Plugin.cxx -o ..\lib\og\Fl_Gl_Device_Plugin.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Window.cxx -o ..\lib\og\Fl_Gl_Window.o
+if not exist ..\lib\og\Fl_Gl_Window.o %DC%\g++.exe -O2 -w -include ..\w98.h -c Fl_Gl_Window.cxx -o ..\lib\og\Fl_Gl_Window.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_geometry.cxx -o ..\lib\og\freeglut_geometry.o
+if not exist ..\lib\og\freeglut_geometry.o %DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_geometry.cxx -o ..\lib\og\freeglut_geometry.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_stroke_mono_roman.cxx -o ..\lib\og\freeglut_stroke_mono_roman.o
+if not exist ..\lib\og\freeglut_stroke_mono_roman.o %DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_stroke_mono_roman.cxx -o ..\lib\og\freeglut_stroke_mono_roman.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_stroke_roman.cxx -o ..\lib\og\freeglut_stroke_roman.o
+if not exist ..\lib\og\freeglut_stroke_roman.o %DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_stroke_roman.cxx -o ..\lib\og\freeglut_stroke_roman.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_teapot.cxx -o ..\lib\og\freeglut_teapot.o
+if not exist ..\lib\og\freeglut_teapot.o %DC%\g++.exe -O2 -w -include ..\w98.h -c freeglut_teapot.cxx -o ..\lib\og\freeglut_teapot.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c gl_draw.cxx -o ..\lib\og\gl_draw.o
+if not exist ..\lib\og\gl_draw.o %DC%\g++.exe -O2 -w -include ..\w98.h -c gl_draw.cxx -o ..\lib\og\gl_draw.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c gl_start.cxx -o ..\lib\og\gl_start.o
+if not exist ..\lib\og\gl_start.o %DC%\g++.exe -O2 -w -include ..\w98.h -c gl_start.cxx -o ..\lib\og\gl_start.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c glut_compatability.cxx -o ..\lib\og\glut_compatability.o
+if not exist ..\lib\og\glut_compatability.o %DC%\g++.exe -O2 -w -include ..\w98.h -c glut_compatability.cxx -o ..\lib\og\glut_compatability.o
 if errorlevel 1 goto failed
-%DC%\g++.exe -O2 -w -include ..\w98.h -c glut_font.cxx -o ..\lib\og\glut_font.o
+if not exist ..\lib\og\glut_font.o %DC%\g++.exe -O2 -w -include ..\w98.h -c glut_font.cxx -o ..\lib\og\glut_font.o
 if errorlevel 1 goto failed
 
 echo Archiving libfltk.a ...

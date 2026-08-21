@@ -32,7 +32,10 @@ FLROOT = os.path.join(LISTDIR, "FL")
 BAT = os.path.join(REPO, "fltk98.bat")
 HDR = os.path.join(FLROOT, "w98.h")
 
-LIMIT = 127          # DOS PSP command tail
+# DOS documents a 127-byte PSP command tail, but Win98 passes full-length
+# command lines to Win32 children: the engine build's 195-character link line
+# runs fine. Lines are still measured and reported, not enforced.
+LIMIT = 127
 DC = r"C:\Dev-Cpp\bin"
 
 # w98.h carries what build_fltk.bat passed as -D flags. WINVER/_WIN32_WINNT at
@@ -115,6 +118,12 @@ def emit(lines, core, gl):
     a("set CPLUS_INCLUDE_PATH=..;.")
     a("set C_INCLUDE_PATH=..;.")
     a("")
+    a("REM ---- Compiles are skipped when the object already exists, so a run")
+    a("REM ---- that dies late does not restart from zero. A skipped compile")
+    a("REM ---- leaves errorlevel untouched, so zero it first rather than")
+    a("REM ---- inheriting whatever ran before this batch.")
+    a("%DC%\\ar.exe --version >nul")
+    a("")
     a("REM ---- Objects live under FL\\lib, which .gitignore already covers.")
     a("if not exist ..\\lib\\nul mkdir ..\\lib")
     a("if not exist ..\\lib\\o\\nul mkdir ..\\lib\\o")
@@ -130,14 +139,20 @@ def emit(lines, core, gl):
                                 ("GL", gl, r"..\lib\og")):
         a("echo Compiling FLTK %s - this takes a while..." % label)
         for s in srcs:
-            stem = s.rsplit(".", 1)[0]
+            # Entries may carry a subdirectory (xutf8/case.c). Objects are
+            # flattened to the bare stem, which is what build_fltk.bat's %%~nf
+            # did too -- verified collision-free across both lists. Separators
+            # are normalised to backslash for DOS.
+            stem = s.replace("/", "\\").rsplit("\\", 1)[-1].rsplit(".", 1)[0]
+            src = s.replace("/", "\\")
             # .c files must be compiled as C, not C++: FLTK's UTF-16 code passes
             # unsigned short* to the ...W() APIs, valid in C (where wchar_t IS
             # unsigned short) but an invalid conversion in C++. Matches FLTK's
             # own build, which uses $(CC) for CFILES.
             cc = "gcc" if s.endswith(".c") else "g++"
-            a("%%DC%%\\%s.exe -O2 -w -include ..\\w98.h -c %s -o %s\\%s.o"
-              % (cc, s, objdir, stem))
+            obj = "%s\\%s.o" % (objdir, stem)
+            a("if not exist %s %%DC%%\\%s.exe -O2 -w -include ..\\w98.h -c %s -o %s"
+              % (obj, cc, src, obj))
             a("if errorlevel 1 goto failed")
         a("")
 
@@ -182,22 +197,25 @@ def main():
     lines = []
     emit(lines, core, gl)
 
-    # Verify every emitted command fits the DOS command tail once %DC% expands.
+    # Measure every emitted command once %DC% expands.
     worst = 0
+    over = []
     for ln in lines:
         exp = ln.replace("%DC%", DC)
-        if exp.startswith(("%s\\" % DC, DC)) or exp.startswith("C:\\"):
+        if DC in exp:                      # any line that launches a tool
             worst = max(worst, len(exp))
             if len(exp) > LIMIT:
-                sys.exit("command line %d > %d chars:\n  %s"
-                         % (len(exp), LIMIT, exp))
+                over.append(len(exp))
 
     open(HDR, "w").write(HEADER)
     open(BAT, "wb").write("\r\n".join(lines).encode("ascii") + b"\r\n")
 
     print("wrote %s  (%d core + %d gl sources)" % (BAT, len(core), len(gl)))
     print("wrote %s" % HDR)
-    print("longest command line: %d chars (DOS limit %d)" % (worst, LIMIT))
+    print("longest command line: %d chars (nominal DOS limit %d)" % (worst, LIMIT))
+    if over:
+        print("  %d line(s) exceed the nominal limit - fine on Win98, which"
+              " passes full command lines to Win32 children" % len(over))
 
 
 if __name__ == "__main__":
