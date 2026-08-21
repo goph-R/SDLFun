@@ -269,6 +269,15 @@ public:
 
     void initGL()
     {
+        {   /* Logged here rather than in main(): this runs inside the first
+               live frame, where the context really is current. */
+            const char *vend = (const char *)glGetString(GL_VENDOR);
+            const char *rend = (const char *)glGetString(GL_RENDERER);
+            const char *vers = (const char *)glGetString(GL_VERSION);
+            conLogf("editor: GL %s | %s | %s\n",
+                    vend ? vend : "(none)", rend ? rend : "(none)",
+                    vers ? vers : "(none)");
+        }
 #ifdef _WIN32
         initMultitexture(editGLGetProc);
 #else
@@ -2114,35 +2123,27 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    view->make_current();
-    {
-        const char *vend = (const char *)glGetString(GL_VENDOR);
-        const char *rend = (const char *)glGetString(GL_RENDERER);
-        const char *vers = (const char *)glGetString(GL_VERSION);
-        if (!rend || !vers) {
-            /* Split the two failure modes: FLTK's make_current() calls
-               fl_create_gl_context() (GetDCEx + SetPixelFormat +
-               wglCreateContext) and then fl_set_gl_context() (wglMakeCurrent).
-               A null context() means creation failed; a non-null one that is
-               still not current means wglMakeCurrent did. */
-            conLogf("editor: FATAL - no current GL context after show().\n");
-            conLogf("editor:   Fl_Gl_Window::context() = %p (%s)\n",
-                    (void *)view->context(),
-                    view->context() ? "created, but not current"
-                                    : "never created");
-#ifdef _WIN32
-            conLogf("editor:   GetLastError() = %lu\n",
-                    (unsigned long)GetLastError());
-#endif
-            return 1;
-        }
-        conLogf("editor: GL %s | %s | %s\n", vend ? vend : "?", rend, vers);
-    }
-
     view->take_focus();
     gSplash->show();                   /* re-raise above the just-shown main window */
 
-    view->bootstrap();                 /* run the load now, ticking the status line */
+    /* Do NOT call make_current()/bootstrap() by hand here. Fl_Gl_Window::flush()
+       calls make_current() itself during a real paint, once the window is fully
+       realised -- and on Win9x that timing matters: called straight after
+       show(), SetPixelFormat on the child window's DC fails with an invalid
+       handle and no context is ever created. draw() runs bootstrap() on the
+       first live frame (see draw()), so pumping the event loop performs the
+       load with a context that is genuinely current, and splashStatus() keeps
+       ticking the splash exactly as before. */
+    for (int spin = 0; spin < 400 && !view->bootstrapped; spin++)
+        Fl::wait(0.05);
+
+    if (!view->bootstrapped) {
+        conLogf("editor: FATAL - no first frame within 20s;"
+                " the GL context never became current.\n");
+        conLogf("editor:   Fl_Gl_Window::context() = %p\n",
+                (void *)view->context());
+        return 1;
+    }
 
     gSplash->hide();
     win->redraw();                     /* repaint the area the splash covered */
