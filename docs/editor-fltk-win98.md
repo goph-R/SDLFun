@@ -134,3 +134,51 @@ like the game.
   root because `main.cpp` uses them too.
 - `game_session.h` — where `gameInit`/`gameFree` moved so `game.h` (the struct)
   can be included without the script/UI/audio runtime.
+
+## Local FLTK patch: GL context on Windows 9x
+
+`vendor/fltk-1.3/FL/src/Fl_Gl_Choice.cxx` carries a one-line local patch. **Re-apply
+it if FLTK is ever upgraded.**
+
+FLTK registers its window class with `CS_OWNDC` (`Fl_win32.cxx`). In
+`fl_create_gl_context` it then asks for a DC with:
+
+```c
+hdc = i->private_dc = GetDCEx(i->xid, 0, DCX_CACHE);
+```
+
+On Windows NT `GetDCEx` merely *ignores* `DCX_CACHE` for a `CS_OWNDC` window. On
+Windows 95/98/ME it **fails and returns NULL**. FLTK never checks the result, so
+`SetPixelFormat` quietly failed on a NULL DC and `wglCreateContext` returned 0 with
+`GetLastError() == ERROR_INVALID_HANDLE` (6).
+
+The symptom was badly misleading: `Fl_Gl_Window::show()` responds to a missing
+context by calling `Fl::error("Insufficient GL support")` and returning **without
+creating the window** (`Fl_Gl_Window.cxx:77`). The editor therefore loaded the level
+and all its assets, logged `Multitexture: not available` on a card that plainly has
+it, showed no window at all, and then sat in `Fl::run()` redrawing a window that did
+not exist until the machine had to be restarted. `Fl::error` defaults to stderr and
+COMMAND.COM has no `2>&1`, so none of it reached a log file.
+
+The patch falls back to `GetDC`, which with `CS_OWNDC` returns the window's own
+private DC — the right DC for a long-lived GL context regardless:
+
+```c
+if (!hdc) hdc = i->private_dc = GetDC(i->xid);
+```
+
+`editor.cpp` also negotiates the GL mode with `Fl_Gl_Window::can_do` rather than
+assuming one, routes `Fl::error`/`warning`/`fatal` into `conLogf`, and exits with a
+diagnostic instead of hanging if the context is missing.
+
+### Rebuilding after touching FLTK source
+
+`fltk98.bat` skips any source whose object already exists, so editing an FLTK file
+is not enough on its own. Delete the object and the build sentinel:
+
+```
+del vendor\fltk-1.3\FL\lib\og\Fl_Gl_Choice.o
+del vendor\fltk-1.3\FL\lib\fltkok.tag
+fltk98
+ed98
+```

@@ -269,6 +269,17 @@ GLContext fl_create_gl_context(Fl_Window* window, const Fl_Gl_Choice* g, int lay
   HDC hdc = i->private_dc;
   if (!hdc) {
     hdc = i->private_dc = GetDCEx(i->xid, 0, DCX_CACHE);
+    /* LOCAL PATCH (SOOB, Win98). FLTK registers its window class with
+       CS_OWNDC (Fl_win32.cxx). On Windows NT, GetDCEx then simply ignores
+       DCX_CACHE -- but on Windows 95/98/ME it FAILS and returns NULL. The
+       result was never checked, so SetPixelFormat quietly failed on a NULL
+       DC and wglCreateContext returned 0 with GetLastError() ==
+       ERROR_INVALID_HANDLE (6). The GL window ended up with no context, and
+       because Fl_Gl_Window::show() returns early in that case, no window
+       appeared at all. With CS_OWNDC the plain GetDC hands back the window's
+       own private DC, which is what a long-lived GL context wants anyway.
+       Re-apply this if FLTK is ever upgraded. */
+    if (!hdc) hdc = i->private_dc = GetDC(i->xid);
     fl_save_dc(i->xid, hdc);
     SetPixelFormat(hdc, g->pixelformat, (PIXELFORMATDESCRIPTOR*)(&g->pfd));
 #    if USE_COLORMAP
