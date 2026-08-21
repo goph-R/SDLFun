@@ -119,6 +119,11 @@ struct DynLightmap {
        copied, at the end of each update. */
     int *curCells, *prevCells;
     int prevCellCount;
+
+    /* One byte per cell, marking those whose texels changed this frame. Used
+       to emit the upload as horizontal runs of cells instead of one rectangle
+       covering them all. */
+    unsigned char *cellDirty;
 };
 
 /* ---- UV-space triangle rasterizer (barycentric) ---- */
@@ -222,6 +227,7 @@ static void dynLmBuildBlockGrid(DynLightmap *dl)
     dl->blockUsed = (unsigned char *)malloc(cells);
     dl->curCells = (int *)malloc(cells * sizeof(int));
     dl->prevCells = (int *)malloc(cells * sizeof(int));
+    dl->cellDirty = (unsigned char *)malloc(cells);
     dl->prevCellCount = 0;
 
     int mapped = 0;
@@ -417,48 +423,59 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
         }
     }
 
-    /* Upload the union of the previous and current boxes. Texels outside it
-       are untouched baked data the GPU already holds, so a full 768KB upload
-       every frame is wasted AGP traffic -- and GL_RGB is the slow path on a
-       GeForce 4 MX, which pads each row out to 32-bit internally as it goes.
-       Restoring the previous box above is what makes the partial upload safe:
-       without it, last frame's light would linger outside the current box. */
     int curValid = (scanMinX <= scanMaxX && scanMinY <= scanMaxY);
-    int upMinX = 0, upMinY = 0, upMaxX = 0, upMaxY = 0, haveUp = 0;
 
-    if (curValid) {
-        upMinX = scanMinX; upMinY = scanMinY;
-        upMaxX = scanMaxX; upMaxY = scanMaxY;
-        haveUp = 1;
-    }
-    if (dl->hasPrev) {
-        if (!haveUp) {
-            upMinX = dl->prevMinX; upMinY = dl->prevMinY;
-            upMaxX = dl->prevMaxX; upMaxY = dl->prevMaxY;
-            haveUp = 1;
-        } else {
-            if (dl->prevMinX < upMinX) upMinX = dl->prevMinX;
-            if (dl->prevMinY < upMinY) upMinY = dl->prevMinY;
-            if (dl->prevMaxX > upMaxX) upMaxX = dl->prevMaxX;
-            if (dl->prevMaxY > upMaxY) upMaxY = dl->prevMaxY;
+    /* Upload the changed cells as horizontal runs, not as one rectangle
+       covering them all. The lightmap is an atlas, so the cells the flashlight
+       touches are scattered: measured on the Win98 box, 92 lit cells (23552
+       texels) sat inside a 416x512 box of 212992 texels -- 9x more than was
+       actually lit, or 639KB of a 768KB texture pushed every frame. Runs of
+       adjacent cells in the same row keep the data proportional to the lit
+       area while staying at a couple of dozen glTexSubImage2D calls rather
+       than one per cell. */
+    int cells = dl->blocksX * dl->blocksY;
+    memset(dl->cellDirty, 0, cells);
+    for (int i = 0; i < dl->prevCellCount; i++)   /* restored above */
+        dl->cellDirty[dl->prevCells[i]] = 1;
+    for (int i = 0; i < cellsHit; i++)            /* lit just now */
+        dl->cellDirty[dl->curCells[i]] = 1;
+
+    int upCalls = 0, upTexels = 0;
+
+    glBindTexture(GL_TEXTURE_2D, dl->texID);
+    /* ROW_LENGTH lets GL walk a sub-rect of the full-width buffer. ALIGNMENT 1
+       stops it rounding each RGB row up to a 4-byte boundary, which would skew
+       the image for any width where width*3 is not a multiple of 4. Both are
+       GL 1.1 core. */
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, w);
+
+    for (int by = 0; by < dl->blocksY; by++) {
+        int bx = 0;
+        while (bx < dl->blocksX) {
+            if (!dl->cellDirty[by * dl->blocksX + bx]) { bx++; continue; }
+
+            int runEnd = bx;
+            while (runEnd < dl->blocksX &&
+                   dl->cellDirty[by * dl->blocksX + runEnd]) runEnd++;
+
+            int ux0 = bx * DYNLM_BLOCK, ux1 = runEnd * DYNLM_BLOCK;
+            int uy0 = by * DYNLM_BLOCK, uy1 = uy0 + DYNLM_BLOCK;
+            if (ux1 > w) ux1 = w;
+            if (uy1 > h) uy1 = h;
+
+            glTexSubImage2D(GL_TEXTURE_2D, 0, ux0, uy0,
+                            ux1 - ux0, uy1 - uy0,
+                            GL_RGB, GL_UNSIGNED_BYTE,
+                            dl->workPixels + (uy0 * w + ux0) * 3);
+            upCalls++;
+            upTexels += (ux1 - ux0) * (uy1 - uy0);
+            bx = runEnd;
         }
     }
 
-    if (haveUp) {
-        glBindTexture(GL_TEXTURE_2D, dl->texID);
-        /* ROW_LENGTH lets GL walk a sub-rect of the full-width buffer.
-           ALIGNMENT 1 stops it rounding each RGB row up to a 4-byte
-           boundary, which would skew the image for any width where
-           width*3 is not a multiple of 4. Both are GL 1.1 core. */
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, w);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, upMinX, upMinY,
-                        upMaxX - upMinX + 1, upMaxY - upMinY + 1,
-                        GL_RGB, GL_UNSIGNED_BYTE,
-                        dl->workPixels + (upMinY * w + upMinX) * 3);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    }
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
     {   /* This frame's lit cells become next frame's restore list. */
         int *swap = dl->prevCells;
@@ -488,10 +505,10 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
             reportTick = 0;
             int boxW = curValid ? (scanMaxX - scanMinX + 1) : 0;
             int boxH = curValid ? (scanMaxY - scanMinY + 1) : 0;
-            conLogf("flashlight: box %dx%d = %d texels, %d cells lit "
-                    "(%d texels), waste %dx\n",
-                    boxW, boxH, boxW * boxH, cellsHit, cellsHit * 256,
-                    cellsHit ? (boxW * boxH) / (cellsHit * 256) : 0);
+            conLogf("flashlight: %d cells lit (%d texels), uploaded %d texels"
+                    " in %d calls (box would have been %dx%d = %d)\n",
+                    cellsHit, cellsHit * 256, upTexels, upCalls,
+                    boxW, boxH, boxW * boxH);
         }
     }
 }
@@ -548,6 +565,7 @@ static void dynLmFree(DynLightmap *dl)
     free(dl->blockUsed);
     free(dl->curCells);
     free(dl->prevCells);
+    free(dl->cellDirty);
     /* Don't delete texID — owned by texture cache */
     memset(dl, 0, sizeof(DynLightmap));
 }
