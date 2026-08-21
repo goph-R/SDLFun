@@ -28,16 +28,28 @@
  *      - Compute distance from the flashlight hit point
  *      - If within radius, add warm white light with quadratic falloff
  *      - Clamp the resulting color to 255
- *    - Re-upload the modified region with glTexSubImage2D (fast partial update)
+ *    - Re-upload the union of this frame's region and the previous frame's
+ *      with glTexSubImage2D (partial update via GL_UNPACK_ROW_LENGTH)
  *
  * 3. FLASHLIGHT OFF — dynLmRestore():
- *    Re-upload the original baked lightmap data (one full glTexSubImage2D).
+ *    Copy the last dirtied region back from bakedPixels and upload just that.
+ *
+ * Only the region the flashlight actually touched is ever copied or uploaded.
+ * Doing the reset and the upload full-size instead costs two 768KB passes per
+ * frame at 512x512, which measured 10-20fps on a 350MHz PII / GeForce 4 MX
+ * against 40-60fps with the flashlight off. Keep both paths box-bounded.
  *
  * Performance:
  *    - worldPosMap build: ~1ms for a 512x512 lightmap with 500 triangles (one time)
  *    - Per-frame update: ~0.2ms for a 128x128 affected region (P4 class CPU)
  *    - glTexSubImage2D: ~0.1ms for a 128x128 partial upload (any GPU)
  *    - Total per frame: ~0.3ms — trivial
+ *
+ *    The coarse pass that finds the affected box still walks every 4th texel
+ *    of the WHOLE map each frame — ~16k samples striding through the 3MB
+ *    worldPosMap, so nearly one cache miss apiece. That is the next thing to
+ *    fix if the flashlight is still costing frames: seed the search from the
+ *    previous box grown by how far the hit point moved.
  *
  * Memory:
  *    - worldPosMap: width * height * 3 * sizeof(float) = 3MB for 512x512
@@ -75,6 +87,14 @@ struct DynLightmap {
 
     /* State */
     int dirty;  /* 1 = working buffer was modified, needs restore when off */
+
+    /* Bounding box of the texels the PREVIOUS frame's flashlight touched.
+       Only this box needs restoring from bakedPixels, and only its union with
+       the current box needs re-uploading -- that is what keeps the per-frame
+       cost proportional to the lit region instead of the whole lightmap.
+       hasPrev = 0 means nothing is dirty yet. */
+    int hasPrev;
+    int prevMinX, prevMinY, prevMaxX, prevMaxY;
 };
 
 /* ---- UV-space triangle rasterizer (barycentric) ---- */
@@ -213,8 +233,16 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
     float hitX = hit.x, hitY = hit.y, hitZ = hit.z;
     float colorR = color.x, colorG = color.y, colorB = color.z;
 
-    /* Reset working buffer to baked state */
-    memcpy(dl->workPixels, dl->bakedPixels, w * h * 3);
+    /* Undo the previous frame's light by copying back just the box it wrote.
+       Resetting the entire buffer here is a 768KB memcpy at 512x512, which
+       costs 1-2ms on a 350MHz PII -- far more than the lit region deserves. */
+    if (dl->hasPrev) {
+        int rowBytes = (dl->prevMaxX - dl->prevMinX + 1) * 3;
+        for (int y = dl->prevMinY; y <= dl->prevMaxY; y++) {
+            int off = (y * w + dl->prevMinX) * 3;
+            memcpy(dl->workPixels + off, dl->bakedPixels + off, rowBytes);
+        }
+    }
 
     /* Only scan texels whose world position could be within radius.
        Walk the worldPosMap in a coarse grid to find the UV-space bounding box
@@ -270,12 +298,56 @@ static void dynLmUpdate(DynLightmap *dl, Vec3 hit,
         }
     }
 
-    /* Upload the full lightmap (working buffer includes baked + flashlight).
-       768KB for 512x512 — trivial even on old hardware. Full upload avoids
-       stale pixels from the previous frame's flashlight position. */
-    glBindTexture(GL_TEXTURE_2D, dl->texID);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dl->width, dl->height,
-                    GL_RGB, GL_UNSIGNED_BYTE, dl->workPixels);
+    /* Upload the union of the previous and current boxes. Texels outside it
+       are untouched baked data the GPU already holds, so a full 768KB upload
+       every frame is wasted AGP traffic -- and GL_RGB is the slow path on a
+       GeForce 4 MX, which pads each row out to 32-bit internally as it goes.
+       Restoring the previous box above is what makes the partial upload safe:
+       without it, last frame's light would linger outside the current box. */
+    int curValid = (scanMinX <= scanMaxX && scanMinY <= scanMaxY);
+    int upMinX = 0, upMinY = 0, upMaxX = 0, upMaxY = 0, haveUp = 0;
+
+    if (curValid) {
+        upMinX = scanMinX; upMinY = scanMinY;
+        upMaxX = scanMaxX; upMaxY = scanMaxY;
+        haveUp = 1;
+    }
+    if (dl->hasPrev) {
+        if (!haveUp) {
+            upMinX = dl->prevMinX; upMinY = dl->prevMinY;
+            upMaxX = dl->prevMaxX; upMaxY = dl->prevMaxY;
+            haveUp = 1;
+        } else {
+            if (dl->prevMinX < upMinX) upMinX = dl->prevMinX;
+            if (dl->prevMinY < upMinY) upMinY = dl->prevMinY;
+            if (dl->prevMaxX > upMaxX) upMaxX = dl->prevMaxX;
+            if (dl->prevMaxY > upMaxY) upMaxY = dl->prevMaxY;
+        }
+    }
+
+    if (haveUp) {
+        glBindTexture(GL_TEXTURE_2D, dl->texID);
+        /* ROW_LENGTH lets GL walk a sub-rect of the full-width buffer.
+           ALIGNMENT 1 stops it rounding each RGB row up to a 4-byte
+           boundary, which would skew the image for any width where
+           width*3 is not a multiple of 4. Both are GL 1.1 core. */
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, w);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, upMinX, upMinY,
+                        upMaxX - upMinX + 1, upMaxY - upMinY + 1,
+                        GL_RGB, GL_UNSIGNED_BYTE,
+                        dl->workPixels + (upMinY * w + upMinX) * 3);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    }
+
+    if (curValid) {
+        dl->prevMinX = scanMinX; dl->prevMinY = scanMinY;
+        dl->prevMaxX = scanMaxX; dl->prevMaxY = scanMaxY;
+        dl->hasPrev = 1;
+    } else {
+        dl->hasPrev = 0;
+    }
 
     dl->dirty = 1;
 }
@@ -286,9 +358,29 @@ static void dynLmRestore(DynLightmap *dl)
 {
     if (!dl->dirty || !dl->bakedPixels) return;
 
-    glBindTexture(GL_TEXTURE_2D, dl->texID);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dl->width, dl->height,
-                    GL_RGB, GL_UNSIGNED_BYTE, dl->bakedPixels);
+    /* Only the last dirtied box differs from the baked lightmap, so restore
+       that and leave the rest of the texture alone. */
+    if (dl->hasPrev) {
+        int w = dl->width;
+        int rowBytes = (dl->prevMaxX - dl->prevMinX + 1) * 3;
+        for (int y = dl->prevMinY; y <= dl->prevMaxY; y++) {
+            int off = (y * w + dl->prevMinX) * 3;
+            memcpy(dl->workPixels + off, dl->bakedPixels + off, rowBytes);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, dl->texID);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, w);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, dl->prevMinX, dl->prevMinY,
+                        dl->prevMaxX - dl->prevMinX + 1,
+                        dl->prevMaxY - dl->prevMinY + 1,
+                        GL_RGB, GL_UNSIGNED_BYTE,
+                        dl->bakedPixels + (dl->prevMinY * w + dl->prevMinX) * 3);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    }
+
+    dl->hasPrev = 0;
     dl->dirty = 0;
 }
 
