@@ -2099,6 +2099,11 @@ int main(int argc, char **argv)
 
     win->show(argc, argv);             /* GL context becomes valid here */
 
+    /* Let the window actually be realised before any GL call. show() only
+       posts the creation; on Win9x the child GL window's HWND and DC are not
+       necessarily usable until the message queue has been pumped once. */
+    Fl::check();
+
     /* Confirm the GL window really came up. On an unsupported mode FLTK logs
        through Fl::error and returns with no window created, leaving nothing to
        draw into -- previously the editor then sat in Fl::run() redrawing a
@@ -2115,7 +2120,20 @@ int main(int argc, char **argv)
         const char *rend = (const char *)glGetString(GL_RENDERER);
         const char *vers = (const char *)glGetString(GL_VERSION);
         if (!rend || !vers) {
-            conLogf("editor: FATAL - GL context is not current after show().\n");
+            /* Split the two failure modes: FLTK's make_current() calls
+               fl_create_gl_context() (GetDCEx + SetPixelFormat +
+               wglCreateContext) and then fl_set_gl_context() (wglMakeCurrent).
+               A null context() means creation failed; a non-null one that is
+               still not current means wglMakeCurrent did. */
+            conLogf("editor: FATAL - no current GL context after show().\n");
+            conLogf("editor:   Fl_Gl_Window::context() = %p (%s)\n",
+                    (void *)view->context(),
+                    view->context() ? "created, but not current"
+                                    : "never created");
+#ifdef _WIN32
+            conLogf("editor:   GetLastError() = %lu\n",
+                    (unsigned long)GetLastError());
+#endif
             return 1;
         }
         conLogf("editor: GL %s | %s | %s\n", vend ? vend : "?", rend, vers);
