@@ -1710,9 +1710,77 @@ static void addPanelHeader(int x, int y, int w, const char *txt)
     h->labelfont(FL_HELVETICA_BOLD);
 }
 
+/* FLTK reports problems through Fl::error / Fl::warning, which default to
+   stderr -- and COMMAND.COM has no 2>&1, so on Win98 those messages are simply
+   lost. Route them into conLogf, which flushes, so `SoobEditor > log.txt`
+   captures them. Fl::fatal must not return. */
+static void editFlMsg(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    buf[sizeof(buf) - 1] = '\0';
+    conLogf("FLTK: %s\n", buf);
+}
+
+static void editFlFatal(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    buf[sizeof(buf) - 1] = '\0';
+    conLogf("FLTK FATAL: %s\n", buf);
+    exit(1);
+}
+
+/* Pick the richest GL mode the driver actually supports, rather than assuming
+   one. A GeForce 4 MX under Win98 may refuse the combination that works on a
+   modern driver, and Fl_Gl_Window::show() responds to an unsupported mode by
+   calling Fl::error and returning WITHOUT creating the window
+   (Fl_Gl_Window.cxx:77) -- which is how the editor ended up running with no
+   window at all. Depth is required for the 3D view; the last two entries exist
+   only so the failure is reported rather than silent. */
+static int editPickGlMode(Fl_Gl_Window *view)
+{
+    static const int modes[] = {
+        FL_RGB | FL_DEPTH | FL_DOUBLE,
+        FL_RGB | FL_DEPTH,
+        FL_RGB | FL_DOUBLE,
+        FL_RGB
+    };
+    static const char *names[] = {
+        "RGB + DEPTH + DOUBLE",
+        "RGB + DEPTH (single-buffered)",
+        "RGB + DOUBLE (NO DEPTH - 3D view will be wrong)",
+        "RGB (NO DEPTH - 3D view will be wrong)"
+    };
+
+    for (int i = 0; i < 4; i++) {
+        if (Fl_Gl_Window::can_do(modes[i])) {
+            view->mode(modes[i]);
+            conLogf("editor: GL mode %s\n", names[i]);
+            return 1;
+        }
+        conLogf("editor: GL mode %s -- not available\n", names[i]);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
-    Fl::gl_visual(FL_RGB | FL_DEPTH | FL_DOUBLE);
+    Fl::error = editFlMsg;
+    Fl::warning = editFlMsg;
+    Fl::fatal = editFlFatal;
+
+    /* Fl::gl_visual() used to be called here. It configures the visual for
+       gl_start()/gl_finish() drawing into a NORMAL window, which this editor
+       never does -- Fl_Gl_Window carries its own mode. Worse, it made the
+       depth buffer an app-wide assumption that nothing verified. The mode is
+       now negotiated per-window in editPickGlMode below. */
     FL_NORMAL_SIZE = 12;               /* UI font: 12 px (FLTK default is 14) */
 
     const int W = 1024, H = 768;
@@ -2024,7 +2092,35 @@ int main(int argc, char **argv)
     gSplash->show();
     Fl::check();                       /* paint the splash before the load blocks */
 
+    if (!editPickGlMode(view)) {
+        conLogf("editor: FATAL - the driver offers no usable GL mode.\n");
+        return 1;
+    }
+
     win->show(argc, argv);             /* GL context becomes valid here */
+
+    /* Confirm the GL window really came up. On an unsupported mode FLTK logs
+       through Fl::error and returns with no window created, leaving nothing to
+       draw into -- previously the editor then sat in Fl::run() redrawing a
+       window that did not exist until the machine had to be restarted. Fail
+       here instead. */
+    if (!view->shown()) {
+        conLogf("editor: FATAL - GL window not created; see FLTK: lines above.\n");
+        return 1;
+    }
+
+    view->make_current();
+    {
+        const char *vend = (const char *)glGetString(GL_VENDOR);
+        const char *rend = (const char *)glGetString(GL_RENDERER);
+        const char *vers = (const char *)glGetString(GL_VERSION);
+        if (!rend || !vers) {
+            conLogf("editor: FATAL - GL context is not current after show().\n");
+            return 1;
+        }
+        conLogf("editor: GL %s | %s | %s\n", vend ? vend : "?", rend, vers);
+    }
+
     view->take_focus();
     gSplash->show();                   /* re-raise above the just-shown main window */
 
