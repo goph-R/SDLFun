@@ -663,19 +663,8 @@ int main(int argc, char *argv[])
     Uint32 lastTime = SDL_GetTicks();
     SDL_Event event;
 
-    /* TEMPORARY frame profile. Mouse rotation costs ~3.5x the frame time of
-       standing still, with the flashlight off and no culling or sorting in the
-       renderer -- so the cost is either the input path or fill rate, and
-       guessing between them is what this measures. Averaged over 60 frames
-       because SDL_GetTicks only has 1ms resolution. Remove once localised. */
-    Uint32 profEv = 0, profWork = 0, profSwap = 0, profMotion = 0;
-    int profFrames = 0;
-
     while (app.running) {
         Uint32 now = SDL_GetTicks();
-        /* Frame-local profile stamps; stay equal in MODE_MENU, where the game
-           event loop below does not run, so that frame reads as pure "work". */
-        Uint32 profT0 = now, profT1 = now;
         float dt = (now - lastTime) / 1000.0f;
         if (dt > 0.15f) dt = 0.15f;
         lastTime = now;
@@ -751,9 +740,7 @@ int main(int argc, char *argv[])
 
         conUpdate(&con, dt);
 
-        profT0 = SDL_GetTicks();
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_MOUSEMOTION) profMotion++;
             if (event.type == SDL_QUIT) {
                 app.running = 0;
                 break;
@@ -859,8 +846,6 @@ int main(int argc, char *argv[])
                 if (game.pitch < -89.0f) game.pitch = -89.0f;
             }
         }
-
-        profT1 = SDL_GetTicks();
 
         /* WASD movement */
         Uint8 *keys = SDL_GetKeyState(NULL);
@@ -1108,22 +1093,7 @@ int main(int argc, char *argv[])
         }
         app.pendingAction = PENDING_NONE;
 
-        Uint32 profT2 = SDL_GetTicks();
         SDL_GL_SwapBuffers();
-        Uint32 profT3 = SDL_GetTicks();
-
-        profEv   += profT1 - profT0;
-        profWork += profT2 - profT1;
-        profSwap += profT3 - profT2;
-        if (++profFrames >= 60) {
-            conLogf("prof: ev %.1fms work %.1fms swap %.1fms | %.1f motion/frame"
-                    " | %d fps\n",
-                    profEv / 60.0f, profWork / 60.0f, profSwap / 60.0f,
-                    profMotion / 60.0f, game.fpsDisplay);
-            profEv = profWork = profSwap = profMotion = 0;
-            profFrames = 0;
-        }
-
         SDL_Delay(1);
     }
 
